@@ -1,0 +1,32 @@
+{
+  "name": "merchant-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@via-saas/core": "^1.0.0",
+    "@via-saas/database": "^0.0.0",
+    "@via-saas/ui": "file:../../packages/ui",
+    "bcryptjs": "^3.0.3",
+    "lucide-react": "^0.344.0",
+    "next": "^14.2.15",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "autoprefixer": "^10.0.1",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5"
+  }
+}

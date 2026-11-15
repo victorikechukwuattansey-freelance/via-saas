@@ -1,0 +1,16 @@
+# VIA SaaS local artifacts — kept out of version control
+node_modules/
+.next/
+dist/
+*.tsbuildinfo
+coverage/
+
+# Secrets and local environment configuration (placeholders live in .env.example)
+.env
+.env.*
+!.env.example
+
+# Local databases / dumps
+*.sqlite
+*.db
+pgdata/

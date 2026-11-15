@@ -1,0 +1,279 @@
+// schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// 1. AUTHENTICATION & TENANCY
+// ==========================================
+
+enum PlanTier {
+  STARTER
+  GROWTH
+  SCALE
+}
+
+enum AuditAction {
+  CREATE_PRODUCT
+  UPDATE_PRODUCT
+  INVITE_STAFF
+  RESOLVE_ORDER
+  UPDATE_SETTINGS
+}
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  phone         String?      @unique
+  passwordHash  String
+  name          String
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  memberships   Membership[]
+  sessions      Session[]
+  auditLogs      AuditLog[]
+  stockActions  StockMovement[] // Audit trail of who did what
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Organization {
+  id             String     @id @default(cuid())
+  name           String
+  subscriptionPlan PlanTier @default(STARTER)
+  createdAt      DateTime   @default(now())
+
+  stores         Store[]
+  memberships    Membership[]
+  products       Product[]
+  orders         Order[]
+  customers      Customer[]
+  apiKeys        ApiKey[]
+  auditLogs      AuditLog[]
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  role           String       // "OWNER", "MANAGER", "STAFF"
+  allowedLocationIds String[] // Empty array = access to all locations
+  
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+}
+
+model ApiKey {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String       // e.g., "Shipbubble Integration"
+  publicKey      String       @unique
+  secretKeyHash  String
+  lastUsedAt     DateTime?
+  
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+// ==========================================
+// 2. STORE & LOCATIONS
+// ==========================================
+
+model Store {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  locations      Location[]
+}
+
+model Location {
+  id             String       @id @default(cuid())
+  storeId        String
+  name           String
+  
+  store          Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  inventory      Inventory[]
+  orders         Order[]
+  carts          Cart[]
+  stockMovements StockMovement[]
+}
+
+// ==========================================
+// 3. CATALOGUE & INVENTORY
+// ==========================================
+
+model Product {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  status         String       @default("PUBLISHED") // "DRAFT", "PUBLISHED"
+  
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  variants       ProductVariant[]
+}
+
+model ProductVariant {
+  id             String       @id @default(cuid())
+  productId      String
+  sku            String?      @unique
+  barcode        String?
+  name           String       // e.g., "Red / Medium"
+  sellingPrice   Decimal      @db.Decimal(10, 2)
+  costPrice      Decimal      @db.Decimal(10, 2)
+  
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  inventory      Inventory[]
+  orderItems     OrderItem[]
+  cartItems      CartItem[]
+  stockMovements StockMovement[]
+}
+
+model Inventory {
+  id          String         @id @default(cuid())
+  locationId  String
+  variantId   String
+  quantity    Int            @default(0)
+  
+  location    Location       @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  variant     ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, variantId])
+}
+
+enum StockMovementType {
+  SALE
+  TRANSFER
+  ADDED
+  REMOVED
+  RETURN
+}
+
+model StockMovement {
+  id          String            @id @default(cuid())
+  locationId  String
+  variantId   String
+  actorId     String?           // The staff member who made the change
+  type        StockMovementType
+  quantity    Int               // Positive for added, negative for removed
+  referenceId String?           // e.g., Order ID if type is SALE
+  createdAt   DateTime          @default(now())
+
+  location    Location          @relation(fields: [locationId], references: [id])
+  variant     ProductVariant    @relation(fields: [variantId], references: [id])
+  actor       User?             @relation(fields: [actorId], references: [id])
+}
+
+// ==========================================
+// 4. CARTS (SHOPPER PLANE)
+// ==========================================
+
+model Cart {
+  id           String     @id @default(cuid())
+  token        String     @unique // The X-Cart-Token
+  locationId   String
+  status       String     @default("ACTIVE") // "ACTIVE", "INACTIVE", "CHECKED_OUT"
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  
+  location     Location   @relation(fields: [locationId], references: [id])
+  items        CartItem[]
+}
+
+model CartItem {
+  id        String         @id @default(cuid())
+  cartId    String
+  variantId String
+  quantity  Int
+  
+  cart      Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+}
+
+// ==========================================
+// 5. ORDERS & CUSTOMERS
+// ==========================================
+
+model Customer {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  email          String?
+  phone          String?
+  
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  orders         Order[]
+}
+
+enum OrderStatus {
+  PENDING
+  ATTENTION // Stock conflict
+  FULFILLED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  REFUNDED
+}
+
+model Order {
+  id             String        @id @default(cuid())
+  organizationId String
+  locationId     String
+  customerId     String?
+  
+  orderNumber    String        // e.g., "ORD-1001"
+  status         OrderStatus   @default(PENDING)
+  paymentStatus  PaymentStatus @default(UNPAID)
+  totalAmount    Decimal       @db.Decimal(10, 2)
+  
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  location       Location      @relation(fields: [locationId], references: [id])
+  customer       Customer?     @relation(fields: [customerId], references: [id])
+  items          OrderItem[]
+}
+
+model OrderItem {
+  id          String         @id @default(cuid())
+  orderId     String
+  variantId   String
+  quantity    Int
+  unitPrice   Decimal        @db.Decimal(10, 2) // Price at time of sale
+
+  order       Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant     ProductVariant @relation(fields: [variantId], references: [id])
+}
+
+model AuditLog {
+  id             String      @id @default(cuid())
+  organizationId String
+  actorId        String      // The User ID who performed the action
+  action         AuditAction
+  targetId       String?     // ID of the product, order, or staff member affected
+  metadata       Json?       // Flexible payload (e.g., old vs new values)
+  createdAt      DateTime    @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor          User         @relation(fields: [actorId], references: [id])
+}

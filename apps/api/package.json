@@ -1,0 +1,23 @@
+{
+  "name": "api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+     "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@via-saas/core": "file:../../packages/core",
+    "@via-saas/database": "file:../../packages/database",
+    "fastify": "^4.26.2",
+    "@fastify/cors": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "tsx": "^4.7.1",
+    "typescript": "^5.3.3"
+  }
+}
