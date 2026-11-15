@@ -20,9 +20,19 @@ export default function StorefrontPage() {
   const [customer, setCustomer] = useState({ name: "", phone: "", email: "" })
   const [cartToken, setCartToken] = useState<string | null>(null)
 
+  // The storefront resolves the merchant via the store's public slug
+  // (configured per deployment) — no hardcoded organization ids.
+  const STORE_SLUG = process.env.NEXT_PUBLIC_STORE_SLUG ?? ""
+  const API_ORIGIN = process.env.NEXT_PUBLIC_API_ORIGIN ?? "http://localhost:4000"
+
   // 1. Fetch products and initialize cart token
   useEffect(() => {
-    fetch("http://localhost:4000/api/products")
+    if (!STORE_SLUG) {
+      console.error("NEXT_PUBLIC_STORE_SLUG is not configured for the storefront.")
+      return
+    }
+
+    fetch(`${API_ORIGIN}/api/stores/${STORE_SLUG}/products`)
       .then(res => res.json())
       .then(data => setProducts(data))
       
@@ -30,7 +40,7 @@ export default function StorefrontPage() {
     if (existingToken) {
       setCartToken(existingToken)
     } else {
-      fetch("http://localhost:4000/api/cart", { method: "POST" })
+      fetch(`${API_ORIGIN}/api/cart`, { method: "POST" })
         .then(res => res.json())
         .then(data => {
           localStorage.setItem("cart_token", data.cartToken)
@@ -61,11 +71,13 @@ export default function StorefrontPage() {
 
     setIsCheckingOut(true)
     
-    const res = await fetch("http://localhost:4000/api/checkout", {
+    const res = await fetch(`${API_ORIGIN}/api/checkout`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        items: cart.map(c => ({ variantId: c.variantId, quantity: c.quantity, price: c.price })),
+        storeSlug: STORE_SLUG,
+        // Prices are computed server-side; only variant ids and quantities are sent.
+        items: cart.map(c => ({ variantId: c.variantId, quantity: c.quantity })),
         customer,
         paymentMethod: "TRANSFER", // Simulate online payment
         cartToken

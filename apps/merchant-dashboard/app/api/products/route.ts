@@ -1,19 +1,14 @@
 import { prisma } from "@via-saas/database"
-import { cookies } from "next/headers"
+import { getSessionContext } from "@/lib/auth-helpers"
 import { NextResponse } from "next/server"
 
 export async function GET() {
-  const token = cookies().get("session_token")?.value
-  const session = await prisma.session.findUnique({
-    where: { token },
-    include: { user: { include: { memberships: true } } }
-  })
-
-  const orgId = session?.user.memberships[0]?.organizationId
-  if (!orgId) return NextResponse.json([])
+  // Centralized session + expiry + membership resolution (E-8).
+  const context = await getSessionContext()
+  if (!context) return NextResponse.json([])
 
   const products = await prisma.product.findMany({
-    where: { organizationId: orgId },
+    where: { organizationId: context.orgId },
     include: { variants: { include: { inventory: true } } }
   })
 

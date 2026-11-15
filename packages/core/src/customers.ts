@@ -1,21 +1,24 @@
 import { prisma } from "@via-saas/database"
+import { DomainError } from "./errors"
 
 export async function upsertCustomer(orgId: string, data: { name: string, phone: string, email?: string }) {
-  if (!data.name || !data.phone) throw new Error("Name and phone are required")
-  
-  // For MVP, we'll assume phone number is the unique identifier per organization
-  const existing = await prisma.customer.findFirst({
-    where: { organizationId: orgId, phone: data.phone }
-  })
+  const name = data.name?.trim()
+  const phone = data.phone?.trim()
 
-  if (existing) return existing
+  if (!name || !phone) throw new DomainError("VALIDATION", "Name and phone are required")
 
-  return prisma.customer.create({
-    data: {
+  // Phone is the per-organization customer identifier. The DB-level unique
+  // constraint Customer @@unique([organizationId, phone]) plus this atomic
+  // upsert make creation safe under concurrent requests (no find-then-create
+  // race, no duplicate customers).
+  return prisma.customer.upsert({
+    where: { organizationId_phone: { organizationId: orgId, phone } },
+    create: {
       organizationId: orgId,
-      name: data.name,
-      phone: data.phone,
-      email: data.email,
-    }
+      name,
+      phone,
+      email: data.email?.trim() || undefined,
+    },
+    update: {}, // existing customers are reused unchanged
   })
 }

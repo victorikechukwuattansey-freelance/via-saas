@@ -63,6 +63,8 @@ model Organization {
   customers      Customer[]
   apiKeys        ApiKey[]
   auditLogs      AuditLog[]
+  staffInvites   StaffInvite[]
+  orderCounter   OrderCounter?
 }
 
 model Membership {
@@ -85,7 +87,35 @@ model ApiKey {
   publicKey      String       @unique
   secretKeyHash  String
   lastUsedAt     DateTime?
-  
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+// Secure staff onboarding: a hashed, single-use, time-limited invite token.
+// The raw token is shown to the inviting OWNER exactly once and is never
+// stored or logged. Replaces the removed hardcoded default password.
+model StaffInvite {
+  id                 String    @id @default(cuid())
+  organizationId     String
+  name               String
+  email              String
+  role               String // "MANAGER" | "STAFF"
+  allowedLocationIds String[]
+  tokenHash          String    @unique
+  expiresAt          DateTime
+  acceptedAt         DateTime?
+  createdAt          DateTime  @default(now())
+
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+// Per-organization sequential counter for collision-safe order numbers.
+// The row is incremented inside the checkout transaction, so concurrent
+// checkouts serialize on the row lock and numbers are unique per org.
+model OrderCounter {
+  organizationId String @id
+  lastNumber     Int    @default(1001)
+
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 }
 
@@ -97,7 +127,10 @@ model Store {
   id             String       @id @default(cuid())
   organizationId String
   name           String
-  
+  // Public identifier used by the storefront plane to resolve the
+  // organization (replaces hardcoded organization/location ids).
+  slug           String?      @unique
+
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   locations      Location[]
 }
@@ -127,6 +160,8 @@ model Product {
   
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   variants       ProductVariant[]
+
+  @@index([organizationId])
 }
 
 model ProductVariant {
@@ -178,6 +213,11 @@ model StockMovement {
   location    Location          @relation(fields: [locationId], references: [id])
   variant     ProductVariant    @relation(fields: [variantId], references: [id])
   actor       User?             @relation(fields: [actorId], references: [id])
+
+  // actorId is null for system-originated movements (e.g., storefront
+  // checkout) — never a fake user id.
+  @@index([locationId])
+  @@index([variantId])
 }
 
 // ==========================================
@@ -216,9 +256,14 @@ model Customer {
   name           String
   email          String?
   phone          String?
-  
+
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   orders         Order[]
+
+  // Phone is the per-organization customer identifier (see core/customers.ts).
+  // The DB-level unique constraint makes customer creation race-safe.
+  @@unique([organizationId, phone])
+  @@index([organizationId])
 }
 
 enum OrderStatus {
@@ -252,6 +297,11 @@ model Order {
   location       Location      @relation(fields: [locationId], references: [id])
   customer       Customer?     @relation(fields: [customerId], references: [id])
   items          OrderItem[]
+
+  // Order numbers are allocated from OrderCounter per organization and are
+  // DB-unique per org — random generation is no longer used.
+  @@unique([organizationId, orderNumber])
+  @@index([organizationId, createdAt])
 }
 
 model OrderItem {
@@ -263,6 +313,8 @@ model OrderItem {
 
   order       Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
   variant     ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@index([orderId])
 }
 
 model AuditLog {
@@ -276,4 +328,6 @@ model AuditLog {
 
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   actor          User         @relation(fields: [actorId], references: [id])
+
+  @@index([organizationId])
 }

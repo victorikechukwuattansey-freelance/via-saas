@@ -9,9 +9,14 @@
   "scripts": {
     "dev": "npm run dev --workspace=merchant-dashboard",
     "build": "npm run build --workspace=merchant-dashboard",
-     "type-check": "npm run type-check --workspaces --if-present"
+    "type-check": "npm run type-check --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@via-saas/core": "^1.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^5.1.0"
   }
 }

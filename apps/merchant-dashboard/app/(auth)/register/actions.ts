@@ -3,6 +3,7 @@
 import { prisma } from "@via-saas/database"
 import bcrypt from "bcryptjs"
 import { redirect } from "next/navigation"
+import { generateStoreSlug } from "@via-saas/core"
 
 export async function registerUser(prevState: any, formData: FormData) {
   const name = formData.get("name") as string
@@ -36,9 +37,13 @@ export async function registerUser(prevState: any, formData: FormData) {
         data: { name: businessName, subscriptionPlan: "GROWTH" },
       })
 
-      // C. Create Store
+      // C. Create Store (public slug resolves the storefront to this org)
       const store = await tx.store.create({
-        data: { name: businessName, organizationId: org.id },
+        data: {
+          name: businessName,
+          organizationId: org.id,
+          slug: generateStoreSlug(businessName),
+        },
       })
 
       // D. Create Default Location

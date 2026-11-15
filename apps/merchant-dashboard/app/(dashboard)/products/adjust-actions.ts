@@ -1,6 +1,6 @@
 "use server"
 
-import { adjustInventory } from "@via-saas/core"
+import { adjustInventory, toSafeErrorMessage } from "@via-saas/core"
 import { getSessionContext } from "@/lib/auth-helpers"
 import { revalidatePath } from "next/cache"
 
@@ -23,6 +23,6 @@ export async function adjustStock(formData: FormData) {
     revalidatePath("/products")
     return { success: true }
   } catch (error: any) {
-    return { error: error.message || "Failed to adjust stock." }
+    return { error: toSafeErrorMessage(error, "Failed to adjust stock.") }
   }
 }

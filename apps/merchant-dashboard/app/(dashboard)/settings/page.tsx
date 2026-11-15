@@ -1,8 +1,7 @@
 import { getSessionContext } from "@/lib/auth-helpers"
 import { prisma } from "@via-saas/database"
 import { redirect } from "next/navigation"
-import { Button } from "@via-saas/ui"
-import { inviteStaff } from "./actions"
+import { StaffInviteForm } from "./StaffInviteForm"
 
 export default async function SettingsPage() {
   const context = await getSessionContext()
@@ -31,42 +30,9 @@ export default async function SettingsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Invite Form */}
-        <div className="bg-white p-6 rounded-lg border border-slate-200 shadow-sm h-fit">
-          <h2 className="text-lg font-semibold mb-4">Invite Team Member</h2>
-          <form action={async (formData) => {
-            "use server"
-            await inviteStaff(formData)
-          }} className="space-y-4">
-            <div>
-              <label className="text-sm font-medium">Full Name</label>
-              <input name="name" type="text" className="w-full px-3 py-2 border rounded-md mt-1" required />
-            </div>
-            <div>
-              <label className="text-sm font-medium">Email Address</label>
-              <input name="email" type="email" className="w-full px-3 py-2 border rounded-md mt-1" required />
-            </div>
-            <div>
-              <label className="text-sm font-medium">Role</label>
-              <select name="role" className="w-full px-3 py-2 border rounded-md mt-1" required>
-                <option value="STAFF">Staff (Restricted)</option>
-                <option value="MANAGER">Manager (Broad Access)</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-sm font-medium">Location Access</label>
-              <select name="locationId" className="w-full px-3 py-2 border rounded-md mt-1">
-                <option value="ALL">All Locations</option>
-                {locations.map(loc => (
-                  <option key={loc.id} value={loc.id}>{loc.name} (Restricted)</option>
-                ))}
-              </select>
-            </div>
-            <Button type="submit" className="w-full">Send Invite</Button>
-          </form>
-          <p className="text-xs text-slate-500 mt-4 text-center">
-            Default password for new staff is <strong>password123</strong>
-          </p>
-        </div>
+        <StaffInviteForm
+          locations={locations.map((loc) => ({ id: loc.id, name: loc.name }))}
+        />
 
         {/* Staff List */}
         <div className="md:col-span-2 bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">

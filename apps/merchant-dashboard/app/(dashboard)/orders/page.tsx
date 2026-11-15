@@ -53,7 +53,7 @@ export default function POSPage() {
     setIsProcessing(true)
     
     const res = await createOrder({
-      items: cart.map(c => ({ variantId: c.variantId, quantity: c.quantity, price: c.price })),
+      items: cart.map(c => ({ variantId: c.variantId, quantity: c.quantity })),
       paymentMethod: method,
       customerName, // Pass these to the server action
       customerPhone
