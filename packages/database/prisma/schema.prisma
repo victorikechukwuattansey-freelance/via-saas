@@ -25,6 +25,19 @@ enum AuditAction {
   INVITE_STAFF
   RESOLVE_ORDER
   UPDATE_SETTINGS
+  // P1-B (X-2 order-side): canonical order-lifecycle audit events.
+  CREATE_ORDER
+  CANCEL_ORDER
+  PAYMENT_RECORDED
+}
+
+// P1-B (D-D): how payment was taken at checkout. Records the method only —
+// explicitly NOT a payment-processing integration. Nullable because orders
+// created before this field existed remain valid (NULL = "recorded before
+// the field existed"; inferable from paymentStatus semantics).
+enum PaymentMethod {
+  CASH
+  TRANSFER
 }
 
 model User {
@@ -341,7 +354,20 @@ model Order {
   status         OrderStatus   @default(PENDING)
   paymentStatus  PaymentStatus @default(UNPAID)
   totalAmount    Decimal       @db.Decimal(10, 2)
-  
+
+  // P1-B (D-D): persisted checkout method (CASH/TRANSFER). NULL for orders
+  // created before this field existed — existing records remain valid.
+  paymentMethod  PaymentMethod?
+
+  // P1-B (D-C): org-scoped checkout idempotency. The key is supplied by the
+  // POS (client-generated UUID per submission attempt); the fingerprint is a
+  // server-computed canonical hash of the meaningful order input. Both are
+  // written in the SAME transaction as the order, so a failed checkout rolls
+  // all three back — the key remains usable for a corrected retry.
+  // Public API requests WITHOUT a key keep M1 retry behavior (keyed only).
+  idempotencyKey   String?
+  requestFingerprint String?
+
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -354,6 +380,10 @@ model Order {
   // DB-unique per org — random generation is no longer used.
   @@unique([organizationId, orderNumber])
   @@index([organizationId, createdAt])
+
+  // D-C: uniqueness is per organization, so keys are never reused across
+  // merchants. NULL keys (unkeyed public-API orders) are unlimited.
+  @@unique([organizationId, idempotencyKey])
 }
 
 model OrderItem {
@@ -372,14 +402,20 @@ model OrderItem {
 model AuditLog {
   id             String      @id @default(cuid())
   organizationId String
-  actorId        String      // The User ID who performed the action
+  // P1-B (D-G): nullable ONLY for system-origin public storefront/API checkout
+  // events — action = CREATE_ORDER with server-stamped top-level
+  // metadata.source = "STOREFRONT_API". Every other event requires a real
+  // authenticated actor (no synthetic system user exists). Enforced by the
+  // central audit helper (packages/core/src/audit.ts) and, as defense in
+  // depth, by the CHECK constraint in migration 20261116120001_p1b_orders_b.
+  actorId        String?
   action         AuditAction
   targetId       String?     // ID of the product, order, or staff member affected
   metadata       Json?       // Flexible payload (e.g., old vs new values)
   createdAt      DateTime    @default(now())
 
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  actor          User         @relation(fields: [actorId], references: [id])
+  actor          User?        @relation(fields: [actorId], references: [id])
 
   @@index([organizationId])
 }

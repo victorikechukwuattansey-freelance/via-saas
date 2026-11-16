@@ -87,6 +87,7 @@ export function buildApp() {
       customer?: { name?: string; phone?: string; email?: string }
       paymentMethod?: string
       cartToken?: string
+      idempotencyKey?: string // optional (D-C): keyed requests are idempotent
     }
 
     // Basic request validation (full schema validation lands with P0-8 follow-up)
@@ -121,6 +122,11 @@ export function buildApp() {
       //    - Unit prices are resolved server-side; client prices are ignored.
       //    - actorId is null: system-originated movements have no fake user id.
       //    - resolvePricedItems rejects drafts/archived products (P1-A contract).
+      //    - D-G audit: the null actor here is what stamps the system-origin
+      //      CREATE_ORDER audit event (top-level source = STOREFRONT_API,
+      //      assigned by this server-side public path — never client input).
+      //    - D-C: an idempotency key MAY be supplied; unkeyed requests keep
+      //      M1 retry behavior (no universal idempotency is claimed).
       const order = await processCheckout(
         resolved.store.organizationId,
         resolved.location.id,
@@ -130,7 +136,10 @@ export function buildApp() {
           quantity: Number(item?.quantity),
         })),
         body.paymentMethod,
-        customer.id
+        customer.id,
+        typeof body.idempotencyKey === "string" && body.idempotencyKey.trim() !== ""
+          ? body.idempotencyKey
+          : undefined
       )
 
       // 3. Invalidate cart token (client will destroy it)

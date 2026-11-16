@@ -1,0 +1,27 @@
+/* P1-B order detail print stylesheet (B-AC8).
+   Print shows only the receipt record: navigation, buttons and the
+   movement history are hidden; the receipt block is sized for A4. */
+
+@media print {
+  /* Screen-only chrome: top nav, action bars, movement history. */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Neutralize dashboard layout paddings/backgrounds for a clean sheet. */
+  body {
+    background: #fff !important;
+  }
+
+  .receipt-sheet {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .receipt-sheet table {
+    page-break-inside: avoid;
+  }
+}
