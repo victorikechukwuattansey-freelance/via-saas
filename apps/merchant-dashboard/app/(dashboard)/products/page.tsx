@@ -1,25 +1,70 @@
 import { getSessionContext } from "@/lib/auth-helpers"
 import { prisma } from "@via-saas/database"
 import { redirect } from "next/navigation"
-import { Button } from "@via-saas/ui"
-import { createProduct } from "./actions"
-import { AdjustStockForm } from "./AdjustStockForm"
+import Link from "next/link"
+import { ProductCard } from "./ProductCard"
+import { CategoryManager } from "./CategoryManager"
+import { CreateProductForm } from "./CreateProductForm"
 
-export default async function ProductsPage() {
+export default async function ProductsPage({
+  searchParams,
+}: {
+  searchParams?: { category?: string }
+}) {
   const context = await getSessionContext()
   if (!context) redirect("/login")
 
-  // Fetch Products for this Organization ONLY (Tenant Isolation)
-  const products = await prisma.product.findMany({
-    where: { organizationId: context.orgId },
-    include: {
-      variants: {
-        include: {
-          inventory: true // To show stock levels
-        }
+  const categoryFilter = searchParams?.category ?? null
+
+  // Fetch Products + categories for this Organization ONLY (Tenant Isolation)
+  const [products, categories] = await Promise.all([
+    prisma.product.findMany({
+      where: { organizationId: context.orgId },
+      include: {
+        variants: {
+          include: { inventory: true } // To show stock levels
+        },
+        images: true,
+        category: true,
       }
-    }
-  })
+    }),
+    prisma.category.findMany({
+      where: { organizationId: context.orgId },
+      include: { _count: { select: { products: true } } },
+      orderBy: { name: "asc" },
+    })
+  ])
+
+  // Shape into plain serializable views for the client components.
+  const productViews = products.map((product) => ({
+    id: product.id,
+    name: product.name,
+    description: product.description,
+    status: product.status,
+    archived: product.archivedAt !== null,
+    categoryId: product.categoryId,
+    categoryName: product.category?.name ?? null,
+    variants: product.variants.map((variant) => ({
+      id: variant.id,
+      name: variant.name,
+      sku: variant.sku,
+      barcode: variant.barcode,
+      sellingPrice: Number(variant.sellingPrice),
+      costPrice: Number(variant.costPrice),
+      stock: variant.inventory.reduce((sum, row) => sum + row.quantity, 0),
+    })),
+    images: product.images.map((image) => ({
+      id: image.id,
+      url: image.url,
+      isPrimary: image.isPrimary,
+    })),
+  }))
+
+  const categoryViews = categories.map((category) => ({
+    id: category.id,
+    name: category.name,
+    productCount: category._count.products,
+  }))
 
   return (
     <div className="space-y-6">
@@ -27,67 +72,45 @@ export default async function ProductsPage() {
         <h1 className="text-2xl font-bold text-slate-900">Product Catalogue</h1>
       </div>
 
+      {/* Category filter (AC-A3): server-side, tenant-scoped */}
+      <div className="flex gap-2 flex-wrap">
+        <Link
+          href="/products"
+          className={`text-xs px-3 py-1 rounded-full border ${!categoryFilter ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"}`}
+        >
+          All
+        </Link>
+        {categoryViews.map((category) => (
+          <Link
+            key={category.id}
+            href={`/products?category=${category.id}`}
+            className={`text-xs px-3 py-1 rounded-full border ${categoryFilter === category.id ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"}`}
+          >
+            {category.name} ({category.productCount})
+          </Link>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Left: Add Product Form */}
-        <div className="bg-white p-6 rounded-lg border border-slate-200 shadow-sm h-fit">
-          <h2 className="text-lg font-semibold mb-4">Add New Product</h2>
-          <form action={async (formData) => {
-            "use server"
-            await createProduct(formData)
-          }} className="space-y-4">
-            <div>
-              <label className="text-sm font-medium">Product Name</label>
-              <input name="name" type="text" className="w-full px-3 py-2 border rounded-md mt-1" required />
-            </div>
-            <div>
-              <label className="text-sm font-medium">SKU (Optional)</label>
-              <input name="sku" type="text" placeholder="e.g. WM-001" className="w-full px-3 py-2 border rounded-md mt-1" />
-            </div>
-            <div>
-              <label className="text-sm font-medium">Price (₦)</label>
-              <input name="price" type="number" step="0.01" className="w-full px-3 py-2 border rounded-md mt-1" required />
-            </div>
-            <div>
-              <label className="text-sm font-medium">Initial Stock</label>
-              <input name="stock" type="number" className="w-full px-3 py-2 border rounded-md mt-1" required />
-            </div>
-            <Button type="submit" className="w-full">Save Product</Button>
-          </form>
+        {/* Left: Add Product Form + Categories */}
+        <div className="space-y-6 h-fit">
+          <CreateProductForm />
+
+          <CategoryManager categories={categoryViews} />
         </div>
 
         {/* Right: Product List */}
         <div className="md:col-span-2 space-y-4">
-          {products.length === 0 ? (
+          {productViews.length === 0 ? (
             <div className="text-center p-12 bg-white rounded-lg border border-slate-200 text-slate-500">
               No products yet. Add your first product to get started.
             </div>
           ) : (
-            products.map((product) => {
-              const variant = product.variants[0]
-              const stock = variant.inventory[0]?.quantity || 0
-              
-              return (
-                <div key={product.id} className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex flex-col">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h3 className="font-semibold text-slate-900">{product.name}</h3>
-                      <p className="text-sm text-slate-500">SKU: {variant.sku || "N/A"}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-bold text-slate-900">₦{Number(variant.sellingPrice).toLocaleString()}</p>
-                      <p className={`text-sm ${stock > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {stock} in stock
-                      </p>
-                    </div>
-                  </div>
-                  
-                  {/* The Adjust Stock Form */}
-                  <div className="mt-2">
-                    <AdjustStockForm variantId={variant.id} />
-                  </div>
-                </div>
-              )
-            })
+            productViews
+              .filter((product) => !categoryFilter || product.categoryId === categoryFilter)
+              .map((product) => (
+                <ProductCard key={product.id} product={product} categories={categoryViews} />
+              ))
           )}
         </div>
       </div>

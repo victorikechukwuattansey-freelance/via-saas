@@ -9,7 +9,7 @@ import { ShoppingCart, CheckCircle2, User} from "lucide-react"
 type Product = {
   id: string
   name: string
-  variants: { id: string; sellingPrice: string; inventory: { quantity: number }[] }[]
+  variants: { id: string; name: string; sellingPrice: string; inventory: { quantity: number }[] }[]
 }
 
 export default function POSPage() {
@@ -28,17 +28,18 @@ export default function POSPage() {
       .then(data => setProducts(data))
   }, [])
 
-  const addToCart = (product: Product) => {
-    const variant = product.variants[0]
+  const addToCart = (product: Product, variant: Product["variants"][number]) => {
     const stock = variant.inventory[0]?.quantity || 0
     if (stock <= 0) return alert("Out of stock!")
+
+    const displayName = product.variants.length > 1 ? `${product.name} — ${variant.name}` : product.name
 
     setCart(prev => {
       const existing = prev.find(i => i.variantId === variant.id)
       if (existing) {
         return prev.map(i => i.variantId === variant.id ? { ...i, quantity: i.quantity + 1 } : i)
       }
-      return [...prev, { variantId: variant.id, name: product.name, price: Number(variant.sellingPrice), quantity: 1 }]
+      return [...prev, { variantId: variant.id, name: displayName, price: Number(variant.sellingPrice), quantity: 1 }]
     })
   }
 
@@ -79,15 +80,20 @@ export default function POSPage() {
         {products.length === 0 && <p className="text-slate-500">Loading products...</p>}
         <div className="grid grid-cols-2 gap-4">
           {products.map(p => (
-            <button 
-              key={p.id} 
-              onClick={() => addToCart(p)}
-              className="bg-white p-4 rounded-lg border border-slate-200 text-left hover:border-blue-500 transition-colors"
-            >
-              <h3 className="font-semibold">{p.name}</h3>
-              <p className="text-blue-600 font-bold">₦{Number(p.variants[0].sellingPrice).toLocaleString()}</p>
-              <p className="text-xs text-slate-500">{p.variants[0].inventory[0]?.quantity || 0} in stock</p>
-            </button>
+            p.variants.map(v => (
+              <button
+                key={v.id}
+                onClick={() => addToCart(p, v)}
+                className="bg-white p-4 rounded-lg border border-slate-200 text-left hover:border-blue-500 transition-colors"
+              >
+                <h3 className="font-semibold">
+                  {p.name}
+                  {p.variants.length > 1 && <span className="text-slate-500 font-normal text-sm"> · {v.name}</span>}
+                </h3>
+                <p className="text-blue-600 font-bold">₦{Number(v.sellingPrice).toLocaleString()}</p>
+                <p className="text-xs text-slate-500">{v.inventory[0]?.quantity || 0} in stock</p>
+              </button>
+            ))
           ))}
         </div>
       </div>

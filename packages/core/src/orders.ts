@@ -56,11 +56,18 @@ async function resolvePricedItems(
     merged.set(item.variantId, (merged.get(item.variantId) ?? 0) + item.quantity)
   }
 
-  // Ownership + availability: the variant must exist under this organization.
+  // Ownership + availability: the variant must exist under this organization
+  // AND its product must be PUBLISHED and not archived (P1-A storefront/POS
+  // publication contract). Drafts and archived products are not sellable;
+  // their history is untouched.
   const variants = await prisma.productVariant.findMany({
     where: {
       id: { in: Array.from(merged.keys()) },
-      product: { organizationId: orgId },
+      product: {
+        organizationId: orgId,
+        status: "PUBLISHED",
+        archivedAt: null,
+      },
     },
     select: { id: true, sellingPrice: true },
   })

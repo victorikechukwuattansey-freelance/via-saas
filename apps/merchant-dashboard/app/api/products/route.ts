@@ -7,8 +7,15 @@ export async function GET() {
   const context = await getSessionContext()
   if (!context) return NextResponse.json([])
 
+  // POS publication contract (P1-A): the POS grid sells exactly what the
+  // storefront can sell — PUBLISHED products that are not archived. Draft and
+  // archived products never appear for sale; their history is untouched.
   const products = await prisma.product.findMany({
-    where: { organizationId: context.orgId },
+    where: {
+      organizationId: context.orgId,
+      status: "PUBLISHED",
+      archivedAt: null,
+    },
     include: { variants: { include: { inventory: true } } }
   })
 

@@ -59,6 +59,8 @@ model Organization {
   stores         Store[]
   memberships    Membership[]
   products       Product[]
+  variants       ProductVariant[]
+  categories     Category[]
   orders         Order[]
   customers      Customer[]
   apiKeys        ApiKey[]
@@ -157,27 +159,77 @@ model Product {
   name           String
   description    String?
   status         String       @default("PUBLISHED") // "DRAFT", "PUBLISHED"
-  
+  // Soft archival (P1-A): archived products are excluded from the storefront
+  // and POS but all order/inventory history is retained. Deletion is guarded
+  // in core (only products never referenced by orders/movements may be deleted).
+  archivedAt     DateTime?
+  categoryId     String?
+
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category       Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   variants       ProductVariant[]
+  images         ProductImage[]
 
   @@index([organizationId])
+  @@index([categoryId])
+}
+
+// Organization-scoped product categories (P1-A). Names are unique per org.
+model Category {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  createdAt      DateTime  @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products       Product[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+// URL-only product images (P1-A, decision D-3): no upload/storage provider —
+// merchants reference externally hosted images. Tenant isolation is enforced
+// through the parent product's organizationId (M1 parent-chain pattern).
+model ProductImage {
+  id         String   @id @default(cuid())
+  productId  String
+  url        String
+  isPrimary  Boolean  @default(false)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
 }
 
 model ProductVariant {
   id             String       @id @default(cuid())
   productId      String
-  sku            String?      @unique
+  // Denormalized from Product so SKU/barcode uniqueness can be enforced
+  // PER ORGANIZATION (P1-A decision D-2) instead of globally. Backfilled
+  // from Product in migration 20261115120000_p1a_catalogue.
+  organizationId String
+  sku            String?
   barcode        String?
   name           String       // e.g., "Red / Medium"
   sellingPrice   Decimal      @db.Decimal(10, 2)
   costPrice      Decimal      @db.Decimal(10, 2)
-  
+
   product        Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id])
   inventory      Inventory[]
   orderItems     OrderItem[]
   cartItems      CartItem[]
   stockMovements StockMovement[]
+
+  // Per-organization uniqueness: two different merchants may both use
+  // "RED-001". NULL sku/barcode values are unlimited (Postgres NULLs are
+  // distinct in unique constraints).
+  @@unique([organizationId, sku])
+  @@unique([organizationId, barcode])
+  @@index([productId])
 }
 
 model Inventory {

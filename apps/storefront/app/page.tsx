@@ -7,7 +7,8 @@ import { ShoppingCart, X } from "lucide-react"
 type Product = {
   id: string
   name: string
-  variants: { id: string; sellingPrice: string; inventory: { quantity: number }[] }[]
+  images: { id: string; url: string; isPrimary: boolean }[]
+  variants: { id: string; name: string; sellingPrice: string; inventory: { quantity: number }[] }[]
 }
 
 export default function StorefrontPage() {
@@ -49,17 +50,18 @@ export default function StorefrontPage() {
     }
   }, [])
 
-  const addToCart = (product: Product) => {
-    const variant = product.variants[0]
+  const addToCart = (product: Product, variant: Product["variants"][number]) => {
     const stock = variant.inventory[0]?.quantity || 0
     if (stock <= 0) return alert("Out of stock!")
+
+    const displayName = product.variants.length > 1 ? `${product.name} — ${variant.name}` : product.name
 
     setCart(prev => {
       const existing = prev.find(i => i.variantId === variant.id)
       if (existing) {
         return prev.map(i => i.variantId === variant.id ? { ...i, quantity: i.quantity + 1 } : i)
       }
-      return [...prev, { variantId: variant.id, name: product.name, price: Number(variant.sellingPrice), quantity: 1 }]
+      return [...prev, { variantId: variant.id, name: displayName, price: Number(variant.sellingPrice), quantity: 1 }]
     })
     setIsCartOpen(true)
   }
@@ -127,20 +129,45 @@ export default function StorefrontPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-8">
         {products.map((product) => {
-          const variant = product.variants[0]
-          const stock = variant.inventory[0]?.quantity || 0
-          
+          const primaryImage = product.images.find(image => image.isPrimary) ?? product.images[0]
+          const totalStock = product.variants.reduce((sum, v) => sum + (v.inventory[0]?.quantity || 0), 0)
+
           return (
             <div key={product.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-              <div className="h-48 bg-slate-100 flex items-center justify-center">
-                <span className="text-slate-400 text-sm">No Image</span>
+              <div className="h-48 bg-slate-100 flex items-center justify-center overflow-hidden">
+                {primaryImage ? (
+                  // URL-only images (decision D-3): merchants host their own media.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={primaryImage.url} alt={product.name} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="text-slate-400 text-sm">No Image</span>
+                )}
               </div>
               <div className="p-6">
                 <h3 className="font-semibold text-lg text-slate-900">{product.name}</h3>
-                <p className="text-slate-500 text-sm mt-1 mb-4">{stock > 0 ? "In Stock" : "Out of Stock"}</p>
-                <div className="flex items-center justify-between">
-                  <span className="text-xl font-bold text-slate-900">₦{Number(variant.sellingPrice).toLocaleString()}</span>
-                  <Button disabled={stock <= 0} size="sm" onClick={() => addToCart(product)}>Add</Button>
+                <p className="text-slate-500 text-sm mt-1 mb-4">{totalStock > 0 ? "In Stock" : "Out of Stock"}</p>
+
+                {product.variants.length > 1 && (
+                  <p className="text-xs text-slate-400 mb-2">Choose a variant:</p>
+                )}
+                <div className="space-y-2">
+                  {product.variants.map((variant) => {
+                    const stock = variant.inventory[0]?.quantity || 0
+                    return (
+                      <div key={variant.id} className="flex items-center justify-between">
+                        <div>
+                          <span className="text-xl font-bold text-slate-900">₦{Number(variant.sellingPrice).toLocaleString()}</span>
+                          {product.variants.length > 1 && (
+                            <span className="text-xs text-slate-500 ml-2">{variant.name}</span>
+                          )}
+                          {product.variants.length > 1 && (
+                            <span className="text-xs text-slate-400 ml-2">{stock} in stock</span>
+                          )}
+                        </div>
+                        <Button disabled={stock <= 0} size="sm" onClick={() => addToCart(product, variant)}>Add</Button>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             </div>

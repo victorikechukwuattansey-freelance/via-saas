@@ -93,6 +93,7 @@ export async function createProductFixture(
   const variant = await prisma.productVariant.create({
     data: {
       productId: product.id,
+      organizationId: orgId,
       name: "Default",
       sellingPrice: config?.price ?? 5000,
       costPrice: config?.price ?? 5000,

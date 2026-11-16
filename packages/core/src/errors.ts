@@ -9,6 +9,7 @@ export class DomainError extends Error {
       | "ITEM_UNAVAILABLE"
       | "INSUFFICIENT_STOCK"
       | "ORDER_NOT_FOUND"
+      | "NOT_FOUND"
       | "FORBIDDEN"
       | "EMAIL_TAKEN"
       | "ALREADY_MEMBER"

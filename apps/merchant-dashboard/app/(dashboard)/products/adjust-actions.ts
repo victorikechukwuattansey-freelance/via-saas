@@ -1,7 +1,7 @@
 "use server"
 
 import { adjustInventory, toSafeErrorMessage } from "@via-saas/core"
-import { getSessionContext } from "@/lib/auth-helpers"
+import { canAdjustStock, getSessionContext } from "@/lib/auth-helpers"
 import { revalidatePath } from "next/cache"
 
 export async function adjustStock(formData: FormData) {
@@ -9,9 +9,11 @@ export async function adjustStock(formData: FormData) {
   const adjustment = parseInt(formData.get("adjustment") as string)
   const reason = formData.get("reason") as string
 
+  // P1-A permission rule: OWNER/MANAGER always; STAFF only when explicitly
+  // authorized via a non-empty allowedLocationIds membership restriction.
   const context = await getSessionContext()
-  if (!context || context.role === "STAFF") {
-    return { error: "Unauthorized. Only Owners and Managers can adjust stock." }
+  if (!context || !canAdjustStock(context)) {
+    return { error: "Unauthorized. Only Owners, Managers, and explicitly authorized staff can adjust stock." }
   }
 
   if (isNaN(adjustment) || adjustment === 0) {
