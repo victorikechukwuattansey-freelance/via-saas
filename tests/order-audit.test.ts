@@ -6,6 +6,10 @@
 // atomicity failure paths (forced audit failure → rollback; forced mutation
 // failure → no orphan audit row), CHECK-constraint behavior on the
 // fresh-migrated test database, and the D-9 pricing guarantees (B-AC19/20).
+//
+// PARALLEL-SAFE: all trigger/function names are file-scoped and predicates
+// are scoped to this file's own org, so this file cannot interfere with
+// other test files running concurrently under Vitest's parallel workers.
 import { describe, expect, it, beforeAll, afterAll } from "vitest"
 import { prisma } from "@via-saas/database"
 import { AuditAction } from "@prisma/client"
@@ -22,12 +26,18 @@ import { createOrganizationFixture, createProductFixture, type OrgFixture, type 
 
 const app = buildApp()
 
+// ── File-scoped trigger identifiers (never shared with other test files) ──
+const AUDIT_FN = "p1b_fail_audit_auditfile"
+const AUDIT_TRG_CREATE = "p1b_kill_audit_auditfile_create"
+const AUDIT_TRG_CANCEL = "p1b_kill_audit_auditfile_cancel"
+
 let org: OrgFixture
 let product: VariantFixture
 let transferProduct: VariantFixture
 
 beforeAll(async () => {
-  await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS p1b_fail_audit_insert() CASCADE`)
+  // Drop only THIS file's own stale function (never another file's)
+  await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${AUDIT_FN}() CASCADE`)
   await app.ready()
   org = await createOrganizationFixture({ locationCount: 1 })
   product = await createProductFixture(org.org.id, org.locations[0].id, { price: 5000, stock: 100 })
@@ -61,7 +71,6 @@ describe("B-AC1 — exactly one CREATE_ORDER audit per order (both branches)", (
     const row = rows[0]
     expect(row.organizationId).toBe(org.org.id)
     expect(row.action).toBe("CREATE_ORDER")
-    // Metadata contract: TOP-LEVEL source key + order facts (R4).
     const metadata = row.metadata as Record<string, unknown>
     expect(metadata.source).toBe("DASHBOARD")
     expect(metadata.orderNumber).toBe(order.orderNumber)
@@ -154,8 +163,6 @@ describe("B-AC3 — ATTENTION resolution audit behavior", () => {
       [{ variantId: attentionProduct.variantId, quantity: 5 }],
       "CASH"
     )
-    // ATTENTION FULFILL assumes the merchant restocked the physical shelf
-    // (M1 semantics): restock before resolving.
     await prisma.inventory.updateMany({
       where: { locationId: org.locations[0].id, variantId: attentionProduct.variantId },
       data: { quantity: 10 },
@@ -169,30 +176,33 @@ describe("B-AC3 — ATTENTION resolution audit behavior", () => {
 })
 
 describe("B-AC4 — atomicity failure paths", () => {
-  /** Creates a trigger that fails AuditLog inserts for THIS test org's
-   *  CREATE_ORDER events (scoped so parallel test files are unaffected). */
+  /**
+   * Creates a trigger that fails AuditLog inserts for THIS test org's
+   * CREATE_ORDER events. Scoped by organizationId so parallel test files
+   * (which use different orgs) are unaffected.
+   */
   async function installAuditKillTrigger() {
     await prisma.$executeRawUnsafe(`
-      CREATE OR REPLACE FUNCTION p1b_fail_audit_insert() RETURNS trigger AS $$
+      CREATE OR REPLACE FUNCTION ${AUDIT_FN}() RETURNS trigger AS $$
       BEGIN
-        RAISE EXCEPTION 'forced audit failure (test trigger)';
+        RAISE EXCEPTION 'forced audit failure (audit-file test)';
       END;
       $$ LANGUAGE plpgsql;
     `)
     await prisma.$executeRawUnsafe(`
-      CREATE TRIGGER p1b_kill_audit_create_order
+      CREATE TRIGGER ${AUDIT_TRG_CREATE}
       BEFORE INSERT ON "AuditLog"
       FOR EACH ROW
       WHEN (NEW."organizationId" = '${org.org.id}' AND NEW."action" = 'CREATE_ORDER')
-      EXECUTE FUNCTION p1b_fail_audit_insert();
+      EXECUTE FUNCTION ${AUDIT_FN}();
     `)
   }
 
- const dropAuditKillTrigger = async () => {
-  await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS p1b_kill_audit_create_order ON "AuditLog"`)
-  await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS p1b_kill_audit_cancel ON "AuditLog"`)  // ← add this
-  await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS p1b_fail_audit_insert() CASCADE`)       // ← add CASCADE
-}
+  const dropAuditKillTrigger = async () => {
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${AUDIT_TRG_CREATE} ON "AuditLog"`)
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${AUDIT_TRG_CANCEL} ON "AuditLog"`)
+    await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${AUDIT_FN}() CASCADE`)
+  }
 
   it("forced audit failure rolls back the checkout — no order, no movements, no audit row", async () => {
     const invBefore = await prisma.inventory.findUnique({ where: { id: product.inventoryId } })
@@ -216,8 +226,6 @@ describe("B-AC4 — atomicity failure paths", () => {
         )
       ).rejects.toThrow(/forced audit failure/)
 
-      // NOTHING persisted: stock, orders, audit rows and movements are all
-      // exactly as before the failed call (full rollback).
       const invAfter = await prisma.inventory.findUnique({ where: { id: product.inventoryId } })
       expect(invAfter?.quantity).toBe(invBefore?.quantity)
       expect(await prisma.order.count({ where: { organizationId: org.org.id } })).toBe(ordersBefore)
@@ -246,31 +254,28 @@ describe("B-AC4 — atomicity failure paths", () => {
 
     await installAuditKillTrigger()
     try {
-      // The trigger fails CREATE_ORDER inserts; the CANCEL_ORDER insert in
-      // cancelOrder needs its own kill trigger scoped to this order.
+      // Scope the cancel trigger to THIS specific order (targetId is globally
+      // unique across orgs, so this is race-safe).
       await prisma.$executeRawUnsafe(`
-        CREATE TRIGGER p1b_kill_audit_cancel
+        CREATE TRIGGER ${AUDIT_TRG_CANCEL}
         BEFORE INSERT ON "AuditLog"
         FOR EACH ROW
         WHEN (NEW."targetId" = '${order.id}' AND NEW."action" = 'CANCEL_ORDER')
-        EXECUTE FUNCTION p1b_fail_audit_insert();
+        EXECUTE FUNCTION ${AUDIT_FN}();
       `)
       await expect(cancelOrder(org.org.id, org.user.id, order.id)).rejects.toThrow(
         /forced audit failure/
       )
 
-      // Order still FULFILLED + UNPAID (status transition rolled back).
       const reloaded = await prisma.order.findUnique({ where: { id: order.id } })
       expect(reloaded?.status).toBe("FULFILLED")
       expect(reloaded?.paymentStatus).toBe("UNPAID")
 
-      // No RETURN movement was written.
       const returns = await prisma.stockMovement.findMany({
         where: { referenceId: order.id, type: "RETURN" },
       })
       expect(returns).toHaveLength(0)
 
-      // Stock was NOT restored.
       const stockAfter = await prisma.inventory.findUnique({ where: { id: product.inventoryId } })
       expect(stockAfter?.quantity).toBe(stockBeforeCancel?.quantity)
     } finally {
@@ -287,21 +292,16 @@ describe("B-AC4 — atomicity failure paths", () => {
       "TRANSFER"
     )
 
-    // Sabotage the mutation: remove the inventory row so restoration fails
-    // AFTER the guarded status transition but BEFORE the audit write.
     await prisma.inventory.delete({ where: { id: product.inventoryId } })
     try {
       await expect(cancelOrder(org.org.id, org.user.id, order.id)).rejects.toThrow()
 
-      // The status transition rolled back with the rest.
       const reloaded = await prisma.order.findUnique({ where: { id: order.id } })
       expect(reloaded?.status).toBe("FULFILLED")
 
-      // NO audit row for the failed cancellation (no orphan audit record).
       const cancels = await auditRowsFor(order.id, "CANCEL_ORDER")
       expect(cancels).toHaveLength(0)
     } finally {
-      // Recreate a minimal inventory row so later teardown/queries are safe.
       await prisma.inventory.create({
         data: { locationId: org.locations[0].id, variantId: product.variantId, quantity: 0 },
       })
@@ -311,8 +311,6 @@ describe("B-AC4 — atomicity failure paths", () => {
 
 describe("B-AC19/B-AC20 — server-authoritative pricing (D-9) re-assertion", () => {
   it("extra client-supplied price fields cannot alter the recorded total (B-AC19)", async () => {
-    // The payload type carries NO price fields; a hostile client spreading
-    // extra properties still cannot influence them (they are dropped).
     const hostileItems = [{ variantId: product.variantId, quantity: 2, unitPrice: 1, total: 2 },
     ] as unknown as {
       variantId: string
@@ -326,7 +324,7 @@ describe("B-AC19/B-AC20 — server-authoritative pricing (D-9) re-assertion", ()
       hostileItems,
       "CASH"
     )
-    expect(Number(order.totalAmount)).toBe(10000) // 2 × 5000 from the DB
+    expect(Number(order.totalAmount)).toBe(10000)
   })
 
   it("editing a variant price after checkout does not change the historical OrderItem.unitPrice (B-AC20)", async () => {
@@ -364,17 +362,14 @@ describe("B-AC31 — null-actor attribution invariant (D-G)", () => {
       logAuditEvent(org.org.id, null, "PAYMENT_RECORDED", "t1")
     ).rejects.toThrow("Audit events require an authenticated actor.")
 
-    // CREATE_ORDER but missing source → reject.
     await expect(
       logAuditEvent(org.org.id, null, "CREATE_ORDER", "t1", { orderNumber: "ORD-X" })
     ).rejects.toThrow("Audit events require an authenticated actor.")
 
-    // CREATE_ORDER but wrong source → reject.
     await expect(
       logAuditEvent(org.org.id, null, "CREATE_ORDER", "t1", { source: "DASHBOARD" })
     ).rejects.toThrow("Audit events require an authenticated actor.")
 
-    // CREATE_ORDER but NESTED source (not top-level) → reject.
     await expect(
       logAuditEvent(org.org.id, null, "CREATE_ORDER", "t1", { meta: { source: STOREFRONT_API_SOURCE } })
     ).rejects.toThrow("Audit events require an authenticated actor.")
@@ -398,12 +393,10 @@ describe("B-AC31 — null-actor attribution invariant (D-G)", () => {
       logAuditEvent(org.org.id, org.user.id, "CREATE_ORDER", "t-spoof", { source: STOREFRONT_API_SOURCE })
     ).rejects.toThrow("System-origin attribution cannot be claimed by an authenticated actor.")
 
-    // Nothing was written.
     expect(await prisma.auditLog.findFirst({ where: { targetId: "t-spoof" } })).toBeNull()
   })
 
   it("(f) CHECK constraint on the fresh-migrated test database: structural matrix", async () => {
-    // Accept: null actor + CREATE_ORDER + top-level STOREFRONT_API source.
     await expect(
       prisma.$executeRawUnsafe(
         `INSERT INTO "AuditLog" ("id", "organizationId", "actorId", "action", "metadata")
@@ -411,7 +404,6 @@ describe("B-AC31 — null-actor attribution invariant (D-G)", () => {
       )
     ).resolves.toBe(1)
 
-    // Reject: null actor + CANCEL_ORDER.
     await expect(
       prisma.$executeRawUnsafe(
         `INSERT INTO "AuditLog" ("id", "organizationId", "actorId", "action")
@@ -419,7 +411,6 @@ describe("B-AC31 — null-actor attribution invariant (D-G)", () => {
       )
     ).rejects.toThrow(/auditlog_actorid_null_only_public_checkout/)
 
-    // Reject: null actor + CREATE_ORDER without metadata.
     await expect(
       prisma.$executeRawUnsafe(
         `INSERT INTO "AuditLog" ("id", "organizationId", "actorId", "action")
@@ -427,7 +418,6 @@ describe("B-AC31 — null-actor attribution invariant (D-G)", () => {
       )
     ).rejects.toThrow(/auditlog_actorid_null_only_public_checkout/)
 
-    // Reject: null actor + CREATE_ORDER, source absent.
     await expect(
       prisma.$executeRawUnsafe(
         `INSERT INTO "AuditLog" ("id", "organizationId", "actorId", "action", "metadata")
@@ -435,7 +425,6 @@ describe("B-AC31 — null-actor attribution invariant (D-G)", () => {
       )
     ).rejects.toThrow(/auditlog_actorid_null_only_public_checkout/)
 
-    // Reject: null actor + CREATE_ORDER, NESTED source.
     await expect(
       prisma.$executeRawUnsafe(
         `INSERT INTO "AuditLog" ("id", "organizationId", "actorId", "action", "metadata")
@@ -443,7 +432,6 @@ describe("B-AC31 — null-actor attribution invariant (D-G)", () => {
       )
     ).rejects.toThrow(/auditlog_actorid_null_only_public_checkout/)
 
-    // Reject: null actor + CREATE_ORDER, wrong source.
     await expect(
       prisma.$executeRawUnsafe(
         `INSERT INTO "AuditLog" ("id", "organizationId", "actorId", "action", "metadata")

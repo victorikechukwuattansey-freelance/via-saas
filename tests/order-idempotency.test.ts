@@ -4,9 +4,14 @@
 // order), mismatched-payload conflict, failed checkout frees the key (both
 // pre-transaction validation failures and in-transaction rollback), POS
 // always-keyed vs unkeyed public API behavior, and fingerprint stability.
+//
+// PARALLEL-SAFE: the "in-transaction rollback" trigger is scoped to THIS
+// file's own org (WHEN organizationId = org.org.id) and uses a file-scoped
+// function name, so it cannot fire on other test files' checkouts running
+// concurrently under Vitest's parallel workers.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "@via-saas/database";
-import { AuditAction, Prisma } from "@prisma/client"; // ← AuditAction must be here
+import { AuditAction, Prisma } from "@prisma/client";
 import { processCheckout } from "@via-saas/core";
 import { buildApp } from "../apps/api/src/app";
 import {
@@ -16,6 +21,10 @@ import {
   type VariantFixture,
 } from "./helpers";
 
+// ── File-scoped trigger identifiers (never shared with other test files) ──
+const IDEM_FN = "p1b_fail_audit_idemfile";
+const IDEM_TRG = "p1b_kill_audit_idemfile";
+
 const app = buildApp();
 
 let org: OrgFixture;
@@ -23,10 +32,12 @@ let productA: VariantFixture;
 let productB: VariantFixture;
 
 beforeAll(async () => {
-  // Clear any stale triggers left by parallel test files
-  await prisma.$executeRawUnsafe(
-    `DROP FUNCTION IF EXISTS p1b_fail_audit_insert() CASCADE`,
-  );
+  // Drop only THIS file's own stale function (both old and new names, in
+  // case a prior crashed run left either behind). Never drop another
+  // file's function name — dropping another file's function CASCADE while
+  // that file is mid-test would break it.
+  await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS p1b_fail_audit_idem() CASCADE`);
+  await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${IDEM_FN}() CASCADE`);
   await app.ready();
   org = await createOrganizationFixture({ locationCount: 1 });
   productA = await createProductFixture(org.org.id, org.locations[0].id, {
@@ -37,6 +48,10 @@ beforeAll(async () => {
     price: 3000,
     stock: 100,
   });
+});
+
+afterAll(async () => {
+  await app.close();
 });
 
 describe("B-AC21 — same key + same payload returns the original order", () => {
@@ -74,7 +89,6 @@ describe("B-AC21 — same key + same payload returns the original order", () => 
     });
     expect(ordersWithKey).toBe(1);
 
-    // Exactly one CREATE_ORDER audit event for the replayed order.
     const audits = await prisma.auditLog.findMany({
       where: { targetId: first.id, action: "CREATE_ORDER" },
     });
@@ -83,7 +97,6 @@ describe("B-AC21 — same key + same payload returns the original order", () => 
 
   it("fingerprint is stable across submission-order and customer-resolution cosmetics", async () => {
     const key = `idem-fp-${Date.now()}-${Math.random()}`;
-    // Same items, reversed order → same fingerprint → replay (not conflict).
     const first = await processCheckout(
       org.org.id,
       org.locations[0].id,
@@ -112,7 +125,6 @@ describe("B-AC21 — same key + same payload returns the original order", () => 
   });
 
   it("parallel concurrency: exactly one order is created; both callers receive the original", async () => {
-    // 1. CAPTURE STOCK RIGHT HERE (before the concurrent calls)
     const invBefore = await prisma.inventory.findUnique({
       where: {
         locationId_variantId: {
@@ -123,11 +135,8 @@ describe("B-AC21 — same key + same payload returns the original order", () => 
     });
     const stockBefore = invBefore!.quantity;
 
-    const key = "parallel-key-123";
+    const key = `parallel-key-${Date.now()}-${Math.random()}`;
 
-    // 2. FIRE CONCURRENT REQUESTS
-    //    Fingerprint is computed server-side from the payload — no need to
-    //    construct it in the test. Same key + same payload → one order.
     const [r1, r2] = await Promise.all([
       processCheckout(
         org.org.id,
@@ -149,9 +158,8 @@ describe("B-AC21 — same key + same payload returns the original order", () => 
       ),
     ]);
 
-    expect(r1.id).toBe(r2.id); // Both callers receive the same order
+    expect(r1.id).toBe(r2.id);
 
-    // 3. ASSERT EXACTLY ONE DEDUCTION
     const invAfter = await prisma.inventory.findUnique({
       where: {
         locationId_variantId: {
@@ -162,7 +170,6 @@ describe("B-AC21 — same key + same payload returns the original order", () => 
     });
     expect(invAfter?.quantity).toBe(stockBefore - 1);
 
-    // 4. Exactly one CREATE_ORDER audit.
     const audits = await prisma.auditLog.findMany({
       where: { targetId: r1.id, action: AuditAction.CREATE_ORDER },
     });
@@ -197,7 +204,6 @@ describe("B-AC22 — same key + different payload returns a conflict", () => {
       "This order was already submitted with different details.",
     );
 
-    // Also conflicts on a different payment method.
     await expect(
       processCheckout(
         org.org.id,
@@ -267,13 +273,11 @@ describe("B-AC23 — failed checkout does not reserve an unusable key", () => {
       ),
     ).rejects.toThrow();
 
-    // Nothing was persisted with the key.
     const withKey = await prisma.order.findMany({
       where: { organizationId: org.org.id, idempotencyKey: key },
     });
     expect(withKey).toHaveLength(0);
 
-    // Corrected retry with the SAME key succeeds.
     const retry = await processCheckout(
       org.org.id,
       org.locations[0].id,
@@ -289,19 +293,23 @@ describe("B-AC23 — failed checkout does not reserve an unusable key", () => {
   it("in-transaction rollback (forced audit failure) frees the key for a corrected retry", async () => {
     const key = `idem-tx-${Date.now()}-${Math.random()}`;
 
+    // Simplified function: no internal IF — the trigger's WHEN clause does
+    // the filtering. The predicate is scoped to THIS file's own org so
+    // concurrent test files (which use different orgs) are unaffected.
     await prisma.$executeRawUnsafe(`
-      CREATE OR REPLACE FUNCTION p1b_fail_audit_idem() RETURNS trigger AS $$
+      CREATE OR REPLACE FUNCTION ${IDEM_FN}() RETURNS trigger AS $$
       BEGIN
-        IF NEW."metadata"->>'source' = 'DASHBOARD' THEN
-          RAISE EXCEPTION 'forced audit failure (idempotency test)';
-        END IF;
-        RETURN NEW;
+        RAISE EXCEPTION 'forced audit failure (idempotency test)';
       END;
       $$ LANGUAGE plpgsql;
     `);
-    await prisma.$executeRawUnsafe(
-      `CREATE TRIGGER p1b_kill_audit_idem BEFORE INSERT ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION p1b_fail_audit_idem()`,
-    );
+    await prisma.$executeRawUnsafe(`
+      CREATE TRIGGER ${IDEM_TRG}
+      BEFORE INSERT ON "AuditLog"
+      FOR EACH ROW
+      WHEN (NEW."organizationId" = '${org.org.id}' AND NEW."metadata"->>'source' = 'DASHBOARD')
+      EXECUTE FUNCTION ${IDEM_FN}();
+    `);
 
     try {
       await expect(
@@ -316,21 +324,19 @@ describe("B-AC23 — failed checkout does not reserve an unusable key", () => {
         ),
       ).rejects.toThrow(/forced audit failure/);
 
-      // The whole transaction rolled back: no order carries the key.
       const withKey = await prisma.order.findMany({
         where: { organizationId: org.org.id, idempotencyKey: key },
       });
       expect(withKey).toHaveLength(0);
     } finally {
       await prisma.$executeRawUnsafe(
-        `DROP TRIGGER IF EXISTS p1b_kill_audit_idem ON "AuditLog"`,
+        `DROP TRIGGER IF EXISTS ${IDEM_TRG} ON "AuditLog"`,
       );
       await prisma.$executeRawUnsafe(
-        `DROP FUNCTION IF EXISTS p1b_fail_audit_idem()`,
+        `DROP FUNCTION IF EXISTS ${IDEM_FN}() CASCADE`,
       );
     }
 
-    // Corrected retry with the SAME key now succeeds.
     const retry = await processCheckout(
       org.org.id,
       org.locations[0].id,
@@ -364,7 +370,6 @@ describe("B-AC23 — failed checkout does not reserve an unusable key", () => {
     expect(order.status).toBe("ATTENTION");
     expect(order.idempotencyKey).toBe(key);
 
-    // Replay with the same key returns the same ATTENTION order.
     const replay = await processCheckout(
       org.org.id,
       org.locations[0].id,
@@ -403,7 +408,6 @@ describe("B-AC24 — POS always keyed; unkeyed public API keeps M1 behavior", ()
     expect(r2.statusCode).toBe(200);
     expect(r2.json().orderNumber).not.toBe(r1.json().orderNumber);
 
-    // Both orders are unkeyed.
     const unkeyed = await prisma.order.findMany({
       where: { organizationId: org.org.id, idempotencyKey: null },
     });
