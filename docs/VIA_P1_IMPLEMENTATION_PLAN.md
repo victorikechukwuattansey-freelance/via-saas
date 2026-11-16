@@ -518,3 +518,31 @@ Full AC tables will be drafted per milestone at implementation-planning sign-off
 - Storefront: `apps/storefront/app/page.tsx` (slug-driven)
 - Tests: `tests/*.test.ts` (7 suites, 48 tests) + `helpers.ts`, `global-setup.ts`, `vitest.config.ts`
 - CI: parent-repo `.github/workflows/via-saas-ci.yml` (green on `8eec1fc`)
+
+---
+
+## Progress Update - 2026-11-16
+
+### P1-B delivered [OK]
+
+- Commit: 22d5be8 (P1-B: POS and order lifecycle completion)
+- Parent: a0fbd75 (P1-A - Merchants Own Their Catalogue)
+- Test baseline: 156/156 (83 pre-existing M1 + 73 new P1-B)
+- M1 frozen files: byte-identical to 8eec1fc
+- Migration replay: A -> B sequencing verified on fresh PostgreSQL 15.20
+- Type-check: green (5/5 workspaces); prisma validate clean
+- Manual smoke: sale -> detail -> record payment -> void (stock restored exactly once at original location)
+
+Delivered items:
+
+- P1-08 - Order detail / receipt-record page + print stylesheet
+- P1-09 - Order cancellation (FULFILLED + UNPAID void) with RETURN movements matching original SALE
+- P1-10 - POS SKU/barcode search
+- P1-11 - Orders list pagination + location filter
+- P1-18 (order-side subset of X-2) - Audit enum widening (CREATE_ORDER, CANCEL_ORDER, PAYMENT_RECORDED), transaction-bound audit writes, null-actor invariant (D-G)
+
+Acceptance criteria: All B-AC1..B-AC31 from VIA_P1B_IMPLEMENTATION_PLAN.md section 12 pass with named tests, including concurrency, conflict, rollback, and authorization failure paths.
+
+Open follow-up: CI workflow diagnostics - .github/workflows/via-saas-ci.yml exists at repo root; CI trigger under investigation.
+
+Next milestone: P1-C (Staff/org per section F.2) - awaiting owner sign-off.
