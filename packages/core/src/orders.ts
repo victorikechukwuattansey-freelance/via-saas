@@ -189,9 +189,11 @@ export async function processCheckout(
     key = idempotencyKey
   }
 
-  // Tenant authorization: the checkout location must belong to the organization.
+  // Tenant authorization: the checkout location must belong to the organization
+  // AND be active — an archived location is rejected outright (P1-16 pre-check,
+  // C-D12 part 1 of 2; the in-tx re-check below is part 2 of 2).
   const location = await prisma.location.findFirst({
-    where: { id: locationId, store: { organizationId: orgId } },
+    where: { id: locationId, store: { organizationId: orgId }, archivedAt: null },
     select: { id: true },
   })
   if (!location) {
@@ -237,6 +239,22 @@ export async function processCheckout(
   try {
     // Attempt to process the order and deduct inventory atomically
     return await prisma.$transaction(async (tx) => {
+      // C-D12 (approved): in-transaction archived-location re-check — closes
+      // the archive-vs-checkout race. The archive transition (L1, admin
+      // domain) and this transaction's writes serialize at commit; the
+      // re-check makes the invariant "no order lands on a location archived
+      // at order-commit time" hard (C-AC28). One indexed point-read.
+      const activeLocation = await tx.location.findFirst({
+        where: { id: locationId, store: { organizationId: orgId }, archivedAt: null },
+        select: { id: true },
+      })
+      if (!activeLocation) {
+        throw new DomainError(
+          "FORBIDDEN",
+          "The checkout location is no longer active."
+        )
+      }
+
       // 1. Atomically deduct inventory. If any item doesn't have enough stock,
       //    this throws and the transaction rolls back.
       for (const item of pricedItems) {
@@ -444,6 +462,22 @@ export async function resolveAttentionOrder(
     }
 
     if (action === "FULFILL") {
+      // C-D12 (approved): same in-transaction archived-location re-check as
+      // checkout — an order resolved AFTER its location was archived must
+      // not deduct stock there. The CANCEL branch above is intentionally
+      // unrestricted (C8/C16: cancellation and RETURN are never blocked by
+      // archival, and never redirected).
+      const activeLocation = await tx.location.findFirst({
+        where: { id: order.locationId, store: { organizationId: orgId }, archivedAt: null },
+        select: { id: true },
+      })
+      if (!activeLocation) {
+        throw new DomainError(
+          "FORBIDDEN",
+          "This order's location is archived and cannot be fulfilled."
+        )
+      }
+
       // Deduct inventory now (assuming the merchant restocked their physical shelves)
       for (const item of order.items) {
         const updateResult = await tx.inventory.updateMany({

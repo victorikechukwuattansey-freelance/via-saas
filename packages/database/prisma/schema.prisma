@@ -29,6 +29,15 @@ enum AuditAction {
   CREATE_ORDER
   CANCEL_ORDER
   PAYMENT_RECORDED
+  // P1-C: staff/membership, invitation lifecycle, location lifecycle, and
+  // organization-switch audit events (C-D6 + C-D22b, approved).
+  UPDATE_STAFF
+  REMOVE_STAFF
+  RESCIND_INVITE
+  CREATE_LOCATION
+  UPDATE_LOCATION
+  ARCHIVE_LOCATION
+  SWITCH_ORG
 }
 
 // P1-B (D-D): how payment was taken at checkout. Records the method only —
@@ -60,6 +69,10 @@ model Session {
   userId    String
   token     String   @unique
   expiresAt DateTime
+  // P1-17 (C-D13/C-D10 roadmap): server-authoritative active organization.
+  // Nullable = legacy sessions (resolve via the eligible-first fallback);
+  // possibly stale = first-class state re-verified at resolution (C11).
+  activeOrganizationId String?
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
@@ -86,6 +99,9 @@ model Membership {
   id             String       @id @default(cuid())
   userId         String
   organizationId String
+  // P1-C (C-D1b): constrained by the DB CHECK `membership_role_canonical`
+  // to the three canonical values; the TS union in @via-saas/core is the
+  // application-level gate.
   role           String       // "OWNER", "MANAGER", "STAFF"
   allowedLocationIds String[] // Empty array = access to all locations
   
@@ -119,6 +135,9 @@ model StaffInvite {
   tokenHash          String    @unique
   expiresAt          DateTime
   acceptedAt         DateTime?
+  // P1-C (P1-15): terminal revocation (manual rescission or supersession).
+  // A revoked invite is never acceptable, regardless of other fields (§8.1).
+  revokedAt          DateTime?
   createdAt          DateTime  @default(now())
 
   organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -142,6 +161,9 @@ model Store {
   id             String       @id @default(cuid())
   organizationId String
   name           String
+  // P1-C (C18 amendment, owner-approved): creation timestamp — the primary
+  // deterministic-ordering key for automatic location selection.
+  createdAt      DateTime     @default(now())
   // Public identifier used by the storefront plane to resolve the
   // organization (replaces hardcoded organization/location ids).
   slug           String?      @unique
@@ -154,12 +176,26 @@ model Location {
   id             String       @id @default(cuid())
   storeId        String
   name           String
+  // P1-C (C18 amendment, owner-approved): creation timestamp — the primary
+  // deterministic-ordering key for automatic location selection (no reorder
+  // on rename/archive).
+  createdAt      DateTime     @default(now())
+  // P1-C (P1-16): soft deactivation. NULL = active. Archived locations are
+  // excluded from new activity (checkout, FULFILL, adjustments, invites,
+  // access grants) but ALL history is retained; restore clears the field.
+  archivedAt     DateTime?
   
   store          Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
   inventory      Inventory[]
   orders         Order[]
   carts          Cart[]
   stockMovements StockMovement[]
+
+  // P1-C (C-D11a, audit F-01): per-store name uniqueness. Declared here to
+  // match the DB index created by migration 20261116130001
+  // (`Location_storeId_name_key`) — Prisma generates the identical name for
+  // this attribute, so schema and migration history agree.
+  @@unique([storeId, name])
 }
 
 // ==========================================

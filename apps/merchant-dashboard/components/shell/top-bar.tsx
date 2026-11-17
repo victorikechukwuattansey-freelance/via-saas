@@ -1,21 +1,27 @@
 import { MapPin, UserCircle, LogOut } from "lucide-react"
 import { logout } from "@/app/actions/auth"
+import { OrgSwitcher } from "./org-switcher"
 
 interface TopBarProps {
   userName: string
   role: string
+  organizations: { organizationId: string; name: string }[]
+  currentOrgId: string
 }
 
-export function TopBar({ userName, role }: TopBarProps) {
+export function TopBar({ userName, role, organizations, currentOrgId }: TopBarProps) {
   return (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-8 sticky top-0 z-40">
       <div className="flex items-center gap-4">
-        {/* Location Switcher */}
-        <button className="flex items-center gap-2 text-sm font-medium text-slate-700 bg-slate-100 px-3 py-1.5 rounded-md hover:bg-slate-200 transition-colors">
-          <MapPin className="h-4 w-4 text-blue-600" />
-          <span>Main Store - Lekki</span>
-          <span className="text-xs text-slate-400">▼</span>
-        </button>
+        {/* Organization switcher (P1-17): real eligible organizations; the
+            former DR-2 fake location button is replaced. The active LOCATION
+            is resolved server-side per request (§10.2) and is not a client
+            selection surface. */}
+        <OrgSwitcher organizations={organizations} currentOrgId={currentOrgId} />
+        <span className="hidden sm:flex items-center gap-1.5 text-xs text-slate-400">
+          <MapPin className="h-3.5 w-3.5" />
+          location resolved per request
+        </span>
       </div>
 
       <div className="flex items-center gap-4">
