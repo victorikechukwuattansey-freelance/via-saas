@@ -3,12 +3,14 @@
 import { prisma } from "@via-saas/database"
 import bcrypt from "bcryptjs"
 import { redirect } from "next/navigation"
-import { generateStoreSlug } from "@via-saas/core"
+import { generateStoreSlug, normalizeEmail } from "@via-saas/core"
 
 export async function registerUser(prevState: any, formData: FormData) {
   const name = formData.get("name") as string
   const businessName = formData.get("business") as string
-  const email = formData.get("email") as string
+  // C-D18a: normalize identically to login and invitations, so a user who
+  // registered with mixed case can log in case-insensitively.
+  const email = normalizeEmail(formData.get("email") as string)
   const password = formData.get("password") as string
 
   if (!name || !businessName || !email || !password) {

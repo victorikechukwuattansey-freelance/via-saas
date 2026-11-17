@@ -49,7 +49,17 @@ export function buildApp() {
   async function resolveStoreBySlug(slug: string) {
     const store = await prisma.store.findUnique({
       where: { slug },
-      include: { locations: { take: 1 } },
+      // C18 (P1-C): deterministic selection (createdAt, then id via the
+      // secondary sort of Prisma's stable ordering) and archive-safe — only
+      // ACTIVE locations can serve the storefront. A store with zero active
+      // locations fails resolution exactly like a locationless store.
+      include: {
+        locations: {
+          where: { archivedAt: null },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          take: 1,
+        },
+      },
     })
     if (!store || store.locations.length === 0) return null
     return { store, location: store.locations[0] }

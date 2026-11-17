@@ -1,7 +1,7 @@
 import { Sidebar } from "@/components/shell/sidebar"
 import { TopBar } from "@/components/shell/top-bar"
 import { BottomNav } from "@/components/shell/bottom-nav"
-import { getSessionContext } from "@/lib/auth-helpers"
+import { getSessionContext, listEligibleOrganizations } from "@/lib/auth-helpers"
 import { redirect } from "next/navigation"
 
 export default async function DashboardLayout({
@@ -18,13 +18,21 @@ export default async function DashboardLayout({
   }
 
   const role = context.role as "OWNER" | "MANAGER" | "STAFF"
+  // P1-17: eligible organizations for the switcher (deterministic §10.2
+  // order; eligibility = ≥1 accessible ACTIVE location).
+  const organizations = await listEligibleOrganizations(context.userId)
 
   return (
     <div className="min-h-screen bg-slate-50">
       <Sidebar role={role} />
       <div className="md:pl-64 flex flex-col min-h-screen pb-16 md:pb-0">
         {/* Pass real data to the Top Bar */}
-        <TopBar userName={context.user.name} role={role} />
+        <TopBar
+          userName={context.user.name}
+          role={role}
+          organizations={organizations}
+          currentOrgId={context.orgId}
+        />
         <main className="flex-1 p-4 md:p-8">
           {children}
         </main>

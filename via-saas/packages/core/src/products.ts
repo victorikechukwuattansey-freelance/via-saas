@@ -666,13 +666,18 @@ export async function adjustInventory(
   return prisma.$transaction(async (tx) => {
     // TENANT AUTHORIZATION: variant and location must both belong to the
     // caller's organization before any inventory change is possible.
+    // C-D20 (approved): the location must also be ACTIVE — stock adjustments
+    // (ADDED/REMOVED) at an archived location are rejected. This fetch runs
+    // INSIDE the transaction, so it is simultaneously the tenant check and
+    // the in-transaction archived-state check (no race window against the
+    // archive transition beyond the documented pre-tx membership residual).
     const [variant, location] = await Promise.all([
       tx.productVariant.findFirst({
         where: { id: variantId, product: { organizationId: orgId } },
         select: { id: true },
       }),
       tx.location.findFirst({
-        where: { id: locationId, store: { organizationId: orgId } },
+        where: { id: locationId, store: { organizationId: orgId }, archivedAt: null },
         select: { id: true },
       }),
     ])
