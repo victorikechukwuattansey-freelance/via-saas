@@ -821,6 +821,80 @@ The implementation report's earlier "59 PASS + 1 NOT VERIFIED" tally omitted one
 | F-04 | LOW | Two concurrent reinvitations of the same (org, email) can supersede one another's new invites, leaving zero live invitations. OWNER-only, narrow, recoverable by reinviting; accepted as residual. |
 | F-05 | LOW | Documented pre-transaction authorization race (eligibility/scope checked before the tx). Benign by design - resolution re-verifies every request (C11); accepted as residual. |
 
+### 21.6 Post-push verification (2026-11-17, commit `26e73b1e51eabf9a9c28d545befde74a46bc56cd`)
+
+Scope: verification only - no feature changes, no commits/pushes, no schema/migration changes, local development environment only. Smoke records are clearly identifiable (`p1c-*@test.local`, "Smoke P1C ..." orgs/locations).
+
+**A. Remote CI evidence (exact SHA `26e73b1`):**
+
+| Item | Value |
+|---|---|
+| Canonical workflow | "via-saas CI" (`.github/workflows/via-saas-ci.yml`) |
+| Run ID / number | 44026333423 / run #6 |
+| Branch / event | `main` / push |
+| Conclusion | **success** (completed 2026-11-17T05:46:39Z) |
+| Steps verified | containers init, checkout, setup-node, install, **prisma generate ✓, prisma validate ✓, type-check all workspaces ✓, full Vitest suite against a fresh migrated PostgreSQL ✓** |
+| Exact test/file counts | NOT VERIFIED - not exposed by the unauthenticated GitHub API |
+
+C-AC48 classification: **PASS** (CI green for this exact SHA, including the parallel test-file execution against a fresh migrated database). Caveat recorded: the repository also runs a second workflow, "test" (n8n-lead-recovery full suite; run 44026333430), which failed at its "Full test suite" step. This failure is PRE-EXISTING red - runs 3, 4 and 5 (pre-P1-C commits) failed identically, and the workflow targets the parent monorepo's `n8n-lead-recovery` project, not via-saas. It is unrelated to P1-C and is recorded as a repository hygiene issue (fixing it would require a commit/push, out of scope under the verification restrictions).
+
+**B. Local environment used for smoke testing:**
+
+| Item | Value |
+|---|---|
+| API | `apps/api` `npm run dev`, pid 19064, port 4000 (launcher pid 10468) |
+| Dashboard | `apps/merchant-dashboard` `npm run dev`, pid 36588, port 3000 (launcher pid 24352) |
+| Database | Docker container `via_saas_db` (postgres:15-alpine), `localhost:5430/via_saas_db` - local development DB, not production |
+| Env files | only `DATABASE_URL` present; values never printed |
+
+**C. Smoke-test accounts (all created through the real register/invite flows):**
+
+| Account | Email | Role(s) |
+|---|---|---|
+| Owner A | `p1c-smoke-owner-a@test.local` | OWNER of Smoke P1C Org A |
+| Owner B | `p1c-smoke-owner-b@test.local` | MANAGER in Org A (account created via invite acceptance; single-org user) |
+| Staff S | `p1c.smoke.staff@test.local` (stored normalized) | STAFF in Org A |
+| Owner C | `p1c-smoke-owner-c@test.local` | OWNER of Smoke P1C Org C + STAFF in Org A (LINKED invite path) |
+
+**D. Capability results (all PASS):**
+
+- **Staff management** - staff table renders; own row immutable ("Your own record cannot be modified."); role edit STAFF→MANAGER succeeded in-place; edit-row select exposes OWNER/MANAGER/STAFF for the OWNER actor (C-D19a) while the invite-form select has no OWNER option; `/settings` server-redirects non-OWNER users (observed as STAFF navigation → redirect to `/`).
+- **Invitation lifecycle** - one-time URL returned once, 48h expiry shown; reinviting the same email superseded the older invite (PENDING→REVOKED in list, in-place); superseded token rejected with the safe error "This invitation link is invalid, used, or expired."; valid token accepted → account created → redirect `/login?invited=true`; explicit Rescind → REVOKED in-place; email normalization observed (`"  P1C.Smoke.Staff@Test.LOCAL "` stored/displayed as `p1c.smoke.staff@test.local`; mixed-case login succeeds); LINKED path: inviting an existing account returned "This person already has a VIA account — they have been added to your business." and linked the membership directly (no token, no email sent).
+- **Location administration** - created "Smoke P1C Location 2" in-place ("Location created."); archived in-place ("Location archived.", row shows "Archived 17/11/2026" + Restore button); archived location removed from the invite-form and staff-edit location dropdowns; last-active guard: Main Location's Archive button disabled with tooltip "The last active location cannot be archived."; server-side backstop DB-verified (Main Location still active after a forced submission attempt; exactly one ARCHIVE_LOCATION event).
+- **Organization switching** - switcher shows both orgs in deterministic createdAt order [Smoke P1C Org A, Smoke P1C Org C]; login initializes to the eligible-first org (Org A, role STAFF); switch to Org C → selected = Org C, role badge OWNER, session `activeOrganizationId` updated in DB; round-trip back to Org A → role badge STAFF. Audit: SWITCH_ORG events carry `{fromOrganizationId, toOrganizationId}` metadata; 3 events total - one real switch (A→C), one round-trip (C→A), and one same-org duplicate (C→C) caused by a double-submitted form during testing (change-event auto-submit + an explicit `requestSubmit`) - a tester artifact, not an app defect.
+
+**E. C-AC39 (dashboard cache refresh) - PASS on OBSERVED UI behavior** (runtime smoke, not merely `revalidatePath` presence). In-place updates observed without a full page reload:
+1. Invite create → one-time link + invitations list appear immediately.
+2. Reinvite → older invite flips PENDING→REVOKED in the list.
+3. Rescind → PENDING→REVOKED in the list.
+4. Invite acceptance (separate session) → status flips to ACCEPTED for the OWNER.
+5. Staff role edit → row updates + "Staff member updated." feedback.
+6. Location create → locations list + both location dropdowns update.
+7. Location archive → row shows Archived date + Restore; dropdowns exclude it.
+8. Org switch → switcher selection, role badge, header org name, and org-scoped settings data all reflect the new org; no cross-org data remained visible after switching (Org C settings showed only Org C staff/invitations/locations).
+
+Note: archived locations remain listed in the OWNER's Locations panel (with an Archived marker + Restore) by design; they are excluded from all grantable/selectable surfaces.
+
+**F. NOT VERIFIED items (with reasons):**
+
+| Check | Classification | Reason |
+|---|---|---|
+| Exact CI test count / test-file count | NOT VERIFIED | not exposed by the unauthenticated GitHub API; the suite itself ran green |
+| Failed/unauthorized switch attempt producing no SWITCH_ORG audit event | NOT VERIFIED via UI (CI-backed) | the switcher only offers eligible orgs, so an unauthorized selection is unreachable through the UI; server-side rejection is covered by the org-switch tests in the same green CI run |
+| Expired-session switch revival (C-AC40) | NOT VERIFIED via UI (CI-backed) | would require session tampering outside the UI; covered by automated session tests in the same green CI run |
+| Inventory-adjustment / checkout rejection of archived locations (C-AC28/C-AC54) | PASS (CI-backed); UI re-verification not performed | core/storefront-level behavior; exercised by the automated suite in the same green CI run |
+
+**G. Revised acceptance-criteria tally (supersedes §21.5):**
+
+| Classification | Count | Criteria |
+|---|---|---|
+| PASS | **61** | C-AC1..C-AC61 - incl. C-AC48 (CI run 44026333423 for SHA `26e73b1`) and C-AC39 (observed runtime behavior, upgrading the §21.5 source-inspection classification) |
+| NOT VERIFIED | **0** | sub-item limitations recorded in section F above do not change any criterion-level classification |
+| FAIL | **0** | - |
+| **Total** | **61** | - |
+
+**H. Invariants confirmed (no protected data retested):** M1 tenant authorization, P1-A catalogue behavior, and P1-B checkout semantics (pricing, payment, idempotency, cancellation, RETURN stock restoration) were re-verified by the canonical CI run (C-AC47 regression lock: the CI step executed the **full Vitest suite** against a fresh migrated PostgreSQL and concluded `success`, which entails the 156 pre-existing tests passed; the exact test count was not exposed by the API — see section B). F-02's corrected §11.4 wording and the F-03/F-04/F-05 residual register are unchanged and remain accurate.
+
 ---
 
 *End of plan (R2.1, decisions approved at implementation kickoff). Owner approval recorded in §13: all eight blocking decisions (C-D1, C-D3, C-D4, C-D7, C-D13, C-D17, C-D18, C-D20), the material decisions (C-D2, C-D9, C-D10, C-D12, C-D19), and C-D22b (SWITCH_ORG audit) are APPROVED; C-AC58 is applicable. Implementation authorized at commit `859d407` - no commit, push, deployment, or production database change is authorized by the implementation phase; all changes remain uncommitted in the working tree for review. Implementation status is tracked in §21.*
