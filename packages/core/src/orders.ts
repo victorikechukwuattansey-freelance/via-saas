@@ -2,6 +2,7 @@ import { prisma } from "@via-saas/database"
 import { Prisma, type Order } from "@prisma/client"
 import { createHash } from "node:crypto"
 import { logAuditEvent, STOREFRONT_API_SOURCE } from "./audit"
+import { mutateInventory } from "./inventory"
 import { DomainError } from "./errors"
 
 type PricedItem = {
@@ -255,27 +256,14 @@ export async function processCheckout(
         )
       }
 
-      // 1. Atomically deduct inventory. If any item doesn't have enough stock,
-      //    this throws and the transaction rolls back.
-      for (const item of pricedItems) {
-        const updateResult = await tx.inventory.updateMany({
-          where: {
-            locationId,
-            variantId: item.variantId,
-            quantity: { gte: item.quantity }, // The magic check
-          },
-          data: { quantity: { decrement: item.quantity } },
-        })
-
-        if (updateResult.count === 0) {
-          throw new DomainError(
-            "INSUFFICIENT_STOCK",
-            "Not enough stock for one or more items in your cart."
-          )
-        }
-      }
-
-      // 2. Create the Order (Status: FULFILLED because stock was successfully deducted)
+      // 1. Create the Order first. The shared helper (step 2) stamps each
+      //    SALE movement with order.id as its referenceId, so the order row
+      //    must exist inside this transaction before the deduction loop.
+      //    Status is FULFILLED: any helper failure below throws and rolls the
+      //    WHOLE transaction back (order, items, movements, number included),
+      //    preserving all-lines-or-nothing. Order-number allocation is
+      //    transaction-scoped (the OrderCounter upsert above), so a
+      //    rolled-back checkout releases the number exactly as before.
       const order = await tx.order.create({
         data: {
           organizationId: orgId,
@@ -295,7 +283,12 @@ export async function processCheckout(
         },
       })
 
-      // 3. Create Order Items & Stock Movements
+      // 2. Create Order Items, then deduct inventory + write each SALE
+      //    movement through the single-writer helper (P1-D §6.1). Same error
+      //    code/message as before (§6.1.1), same transaction, same
+      //    rollback-on-insufficient semantics; the C-D12 re-check above keeps
+      //    the archived-location guarantee (the helper re-verifies in-tx,
+      //    idempotently).
       for (const item of pricedItems) {
         await tx.orderItem.create({
           data: {
@@ -306,14 +299,23 @@ export async function processCheckout(
           },
         })
 
-        await tx.stockMovement.create({
-          data: {
-            locationId,
-            variantId: item.variantId,
-            actorId: actorId ?? null, // null = system-originated movement
-            type: "SALE",
-            quantity: -item.quantity,
-            referenceId: order.id,
+        await mutateInventory(tx, {
+          orgId,
+          locationId,
+          variantId: item.variantId,
+          delta: -item.quantity,
+          type: "SALE",
+          actorId,
+          referenceId: order.id,
+          errors: {
+            unauthorized: {
+              code: "FORBIDDEN",
+              message: "The checkout location is no longer active.",
+            },
+            insufficient: {
+              code: "INSUFFICIENT_STOCK",
+              message: "Not enough stock for one or more items in your cart.",
+            },
           },
         })
       }
@@ -478,33 +480,29 @@ export async function resolveAttentionOrder(
         )
       }
 
-      // Deduct inventory now (assuming the merchant restocked their physical shelves)
+      // Deduct inventory now (assuming the merchant restocked their physical
+      // shelves) — through the single-writer helper (P1-D §6.1). The per-order
+      // C-D12 archived re-check above keeps its exact error; the helper
+      // re-verifies in-tx, idempotently. Each mapping preserves this site's
+      // shipped error exactly (§6.1.1).
       for (const item of order.items) {
-        const updateResult = await tx.inventory.updateMany({
-          where: {
-            locationId: order.locationId,
-            variantId: item.variantId,
-            quantity: { gte: item.quantity },
-          },
-          data: { quantity: { decrement: item.quantity } },
-        })
-
-        if (updateResult.count === 0) {
-          throw new DomainError(
-            "INSUFFICIENT_STOCK",
-            "Still not enough stock to fulfill this order."
-          )
-        }
-
-        // Actor integrity: record the REAL resolving user, never a fake id.
-        await tx.stockMovement.create({
-          data: {
-            locationId: order.locationId,
-            variantId: item.variantId,
-            actorId, // verified above to be an actual User id passed by the caller
-            type: "SALE",
-            quantity: -item.quantity,
-            referenceId: order.id,
+        await mutateInventory(tx, {
+          orgId,
+          locationId: order.locationId,
+          variantId: item.variantId,
+          delta: -item.quantity,
+          type: "SALE",
+          actorId,
+          referenceId: order.id,
+          errors: {
+            unauthorized: {
+              code: "FORBIDDEN",
+              message: "This order's location is archived and cannot be fulfilled.",
+            },
+            insufficient: {
+              code: "INSUFFICIENT_STOCK",
+              message: "Still not enough stock to fulfill this order.",
+            },
           },
         })
       }
@@ -593,23 +591,25 @@ export async function cancelOrder(
     // variant, location and quantity — the location where stock was actually
     // deducted (§4.7.6). Inventory is touched ONLY through the paired
     // location-scoped increment; never edited without a movement record.
+    // P1-D §6.1: routed through the single-writer helper. The RETURN
+    // exception skips the active-location check inside the helper
+    // (restoration is never blocked or redirected by archival — C8/C16), and
+    // a missing restoration row maps to this site's exact shipped VALIDATION
+    // error (§6.1.1).
     for (const item of order.items) {
-      const restore = await tx.inventory.updateMany({
-        where: { locationId: order.locationId, variantId: item.variantId },
-        data: { quantity: { increment: item.quantity } },
-      })
-      if (restore.count === 0) {
-        throw new DomainError("VALIDATION", "Inventory record missing for restoration.")
-      }
-
-      await tx.stockMovement.create({
-        data: {
-          locationId: order.locationId,
-          variantId: item.variantId,
-          actorId,
-          type: "RETURN",
-          quantity: item.quantity, // positive — restoration
-          referenceId: order.id,
+      await mutateInventory(tx, {
+        orgId,
+        locationId: order.locationId,
+        variantId: item.variantId,
+        delta: item.quantity, // positive — restoration
+        type: "RETURN",
+        actorId, // verified above to be an actual member of this org
+        referenceId: order.id,
+        errors: {
+          insufficient: {
+            code: "VALIDATION",
+            message: "Inventory record missing for restoration.",
+          },
         },
       })
     }

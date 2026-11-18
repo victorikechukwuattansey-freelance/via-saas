@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Home, ShoppingCart, Package, Users, Settings, BarChart, List } from "lucide-react"
+import { Home, ShoppingCart, Package, Users, Settings, BarChart, List, History, ClipboardList } from "lucide-react"
 import { cn } from "@via-saas/ui"
 
 
@@ -15,6 +15,12 @@ export function Sidebar({ role }: SidebarProps) {
     // 2. Add the Order History link
     { name: "Order History", href: "/orders/list", icon: List, roles: ["OWNER", "MANAGER", "STAFF"] },
     { name: "Products", href: "/products", icon: Package, roles: ["OWNER", "MANAGER", "STAFF"] },
+    // P1-D (P1-20): inventory movement history. Visibility per role is
+    // enforced server-side (STAFF sees only accessibleLocationIds).
+    { name: "Inventory History", href: "/inventory", icon: History, roles: ["OWNER", "MANAGER", "STAFF"] },
+    // P1-D (P1-22): stock counts. OWNER/MANAGER only (PD-D2) — the server
+    // re-checks the role on every page and action; this hides the entry only.
+    { name: "Stock Counts", href: "/stock-counts", icon: ClipboardList, roles: ["OWNER", "MANAGER"] },
     { name: "Customers", href: "/customers", icon: Users, roles: ["OWNER", "MANAGER"] },
     { name: "Analytics", href: "/analytics", icon: BarChart, roles: ["OWNER"] },
     { name: "Settings", href: "/settings", icon: Settings, roles: ["OWNER"] },

@@ -16,14 +16,15 @@ export function CategoryManager({ categories }: { categories: CategoryView[] }) 
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    const form = e.currentTarget   // ← capture before await
     setIsLoading(true)
     setError(null)
-    const res = await createCategory(new FormData(e.currentTarget))
+    const res = await createCategory(new FormData(form))
     setIsLoading(false)
     if (res.error) {
       setError(res.error)
     } else {
-      e.currentTarget.reset()
+      form.reset()         // ← use captured reference
     }
   }
 
