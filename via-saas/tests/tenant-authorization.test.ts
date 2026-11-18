@@ -164,7 +164,11 @@ describe("inventory transaction behavior (regression)", () => {
     await adjustInventory(org.org.id, org.user.id, org.locations[0].id, product.variantId, 7, "delivery")
 
     const movement = await prisma.stockMovement.findFirst({
-      where: { variantId: product.variantId, type: "ADDED" },
+      // Exact predicate, not ordering: the adjustment movement is the only
+      // ADDED movement on this variant carrying the manual reason as its
+      // referenceId. The creation-side initial ADDED movement (P1-D PD-D3)
+      // has referenceId: null and is excluded by this predicate.
+      where: { variantId: product.variantId, type: "ADDED", referenceId: "delivery" },
     })
     expect(movement?.actorId).toBe(org.user.id)
     expect(movement?.quantity).toBe(7)

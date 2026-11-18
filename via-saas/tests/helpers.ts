@@ -3,6 +3,9 @@
 import { randomBytes } from "node:crypto"
 import bcrypt from "bcryptjs"
 import { prisma } from "@via-saas/database"
+// P1-D §6.7: contract-covered inventory is created THROUGH the core creation
+// pathway, never directly — see createProductFixture below.
+import { createProduct, updateProduct } from "@via-saas/core"
 
 export type OrgFixture = {
   user: { id: string; email: string }
@@ -82,36 +85,49 @@ export async function createProductFixture(
 ): Promise<VariantFixture> {
   const suffix = randomBytes(4).toString("hex")
 
-  const product = await prisma.product.create({
-    data: {
-      name: `Product ${suffix}`,
-      organizationId: orgId,
-      status: config?.status ?? "PUBLISHED",
-    },
+  // P1-D §6.7: this fixture's inventory row is created THROUGH the core
+  // creation pathway (createProduct), so it carries the initial ADDED
+  // movement and satisfies the ledger-reconciliation invariant
+  // (quantity === Σ movements). The acting user is the org's first member —
+  // fixture attribution only.
+  const membership = await prisma.membership.findFirst({
+    where: { organizationId: orgId },
+    select: { userId: true },
+  })
+  if (!membership) {
+    throw new Error(`createProductFixture: no membership found for org ${orgId}`)
+  }
+
+  const price = config?.price ?? 5000
+  const stock = config?.stock ?? 100
+
+  const product = await createProduct(orgId, membership.userId, locationId, {
+    name: `Product ${suffix}`,
+    price,
+    stock,
+    // Fixture cost semantics preserved: costPrice used to default to the
+    // price (E-21 keeps explicit cost in createProduct, default 0).
+    cost: price,
   })
 
-  const variant = await prisma.productVariant.create({
-    data: {
-      productId: product.id,
-      organizationId: orgId,
-      name: "Default",
-      sellingPrice: config?.price ?? 5000,
-      costPrice: config?.price ?? 5000,
-    },
-  })
+  // createProduct always creates the product PUBLISHED; a DRAFT fixture is
+  // downgraded through the normal catalogue pathway (no publish gate on the
+  // DRAFT direction).
+  if (config?.status && config.status !== "PUBLISHED") {
+    await updateProduct(orgId, membership.userId, product.id, { status: config.status })
+  }
 
-  const inventory = await prisma.inventory.create({
-    data: {
-      locationId,
-      variantId: variant.id,
-      quantity: config?.stock ?? 100,
-    },
+  const variant = await prisma.productVariant.findFirstOrThrow({
+    where: { productId: product.id },
+  })
+  const inventory = await prisma.inventory.findFirstOrThrow({
+    where: { variantId: variant.id, locationId },
   })
 
   return {
     productId: product.id,
     variantId: variant.id,
-    sellingPrice: config?.price ?? 5000,
+    sellingPrice: price,
     inventoryId: inventory.id,
   }
 }

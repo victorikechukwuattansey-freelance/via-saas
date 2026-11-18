@@ -13,6 +13,10 @@ export type VariantView = {
   sellingPrice: number
   costPrice: number
   stock: number
+  // P1-D (P1-21): nullable low-stock threshold + read-time low-stock flag
+  // (computed server-side at the actor's accessible locations).
+  lowStockThreshold: number | null
+  lowStock: boolean
 }
 
 export type ImageView = {
@@ -226,6 +230,13 @@ export function ProductCard({
               <div className="text-right">
                 <p className="font-bold text-slate-900">₦{variant.sellingPrice.toLocaleString()}</p>
                 <p className={`text-sm ${variant.stock > 0 ? "text-green-600" : "text-red-600"}`}>{variant.stock} in stock</p>
+                {/* P1-D (P1-21): read-time low-stock badge (R-9: archived
+                    products are excluded server-side; this is belt-and-braces). */}
+                {variant.lowStock && !product.archived && (
+                  <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                    Low stock
+                  </span>
+                )}
               </div>
             </div>
 
@@ -262,6 +273,19 @@ export function ProductCard({
                   <div>
                     <label className={labelClass}>Cost (₦)</label>
                     <input name="costPrice" type="number" step="0.01" defaultValue={variant.costPrice} className={inputClass} required />
+                  </div>
+                  <div>
+                    {/* P1-D (P1-21): threshold editor field — blank disables
+                        the alert (NULL); 0 flags out-of-stock only. */}
+                    <label className={labelClass}>Low Stock Alert Threshold (blank = off)</label>
+                    <input
+                      name="lowStockThreshold"
+                      type="number"
+                      min="0"
+                      step="1"
+                      defaultValue={variant.lowStockThreshold ?? ""}
+                      className={inputClass}
+                    />
                   </div>
                 </div>
               </InlineActionForm>

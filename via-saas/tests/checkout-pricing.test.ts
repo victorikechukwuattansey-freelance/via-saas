@@ -159,13 +159,17 @@ describe("server-authoritative pricing (E-1)", () => {
 
     expect(order.status).toBe("ATTENTION")
 
-    // Rolled back: stock unchanged, no movements were written
+    // Rolled back: stock unchanged, no SALE movements were written.
+    // (The variant carries exactly one creation-side initial ADDED movement
+    // from the fixture — P1-D PD-D3 — so the assertion filters by type.)
     const orders = await prisma.order.findMany({ where: { organizationId: org.org.id } })
     expect(orders).toHaveLength(1)
     expect(orders[0].status).toBe("ATTENTION")
     const inventory = await prisma.inventory.findUnique({ where: { id: product.inventoryId } })
     expect(inventory?.quantity).toBe(1)
-    const movements = await prisma.stockMovement.count({ where: { variantId: product.variantId } })
+    const movements = await prisma.stockMovement.count({
+      where: { variantId: product.variantId, type: "SALE" },
+    })
     expect(movements).toBe(0)
   })
 })

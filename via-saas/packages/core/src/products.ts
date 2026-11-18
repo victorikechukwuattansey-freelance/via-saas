@@ -1,6 +1,7 @@
 import { prisma } from "@via-saas/database"
 import { Prisma } from "@prisma/client"
 import { logAuditEvent } from "./audit"
+import { mutateInventory } from "./inventory"
 import { DomainError } from "./errors"
 
 const PRODUCT_STATUSES = ["DRAFT", "PUBLISHED"] as const
@@ -134,6 +135,24 @@ export async function createProduct(
     await tx.inventory.create({
       data: { locationId, variantId: variant.id, quantity: data.stock }
     })
+
+    // P1-D (PD-D3): the ledger opens at creation — exactly one initial ADDED
+    // movement for a non-zero initial quantity, so contract-created rows
+    // reconcile (quantity === Σ movements). Zero-quantity rows write nothing:
+    // the sum is 0 trivially, and zero-stock products stay deletable (the
+    // delete guard counts movements).
+    if (data.stock > 0) {
+      await tx.stockMovement.create({
+        data: {
+          locationId,
+          variantId: variant.id,
+          actorId,
+          type: "ADDED",
+          quantity: data.stock,
+          referenceId: null, // initial stock — typed "Initial stock" display is P1-20
+        },
+      })
+    }
 
     // ADD AUDIT LOG
     await logAuditEvent(orgId, actorId, "CREATE_PRODUCT", product.id, { name: data.name, price: data.price, cost: data.cost ?? 0 })
@@ -317,8 +336,9 @@ export async function deleteProduct(orgId: string, actorId: string, productId: s
 /**
  * Adds a variant to an existing product. Runs the same guarded patterns as
  * createProduct: org-scoped product + owned location, per-org SKU uniqueness
- * (D-2), explicit cost (E-21). The initial stock row is created directly (the
- * ledger covers mutations after creation — same semantics as createProduct).
+ * (D-2), explicit cost (E-21). The initial inventory row opens the ledger
+ * with one ADDED movement for a non-zero initial quantity (P1-D, PD-D3 —
+ * same semantics as createProduct).
  */
 export async function addVariant(
   orgId: string,
@@ -386,6 +406,22 @@ export async function addVariant(
       data: { locationId, variantId: variant.id, quantity: data.initialStock },
     })
 
+    // P1-D (PD-D3): same initial-ledger rule as createProduct — exactly one
+    // initial ADDED movement for a non-zero initial quantity; zero writes
+    // nothing.
+    if (data.initialStock > 0) {
+      await tx.stockMovement.create({
+        data: {
+          locationId,
+          variantId: variant.id,
+          actorId,
+          type: "ADDED",
+          quantity: data.initialStock,
+          referenceId: null,
+        },
+      })
+    }
+
     await logAuditEvent(orgId, actorId, "UPDATE_PRODUCT", productId, {
       action: "VARIANT_ADD",
       variantId: variant.id,
@@ -403,7 +439,7 @@ export async function updateVariant(
   orgId: string,
   actorId: string,
   variantId: string,
-  data: { name?: string; sku?: string | null; barcode?: string | null; sellingPrice?: number; costPrice?: number }
+  data: { name?: string; sku?: string | null; barcode?: string | null; sellingPrice?: number; costPrice?: number; lowStockThreshold?: number | null }
 ) {
   return prisma.$transaction(async (tx) => {
     // TENANT AUTHORIZATION through the parent product (M1 pattern).
@@ -412,6 +448,9 @@ export async function updateVariant(
       select: {
         id: true, productId: true, name: true, sku: true, barcode: true,
         sellingPrice: true, costPrice: true,
+        // P1-D (F3 closure): the threshold is part of the audited snapshot, so
+        // a threshold change is reconstructable from the audit trail.
+        lowStockThreshold: true,
         product: { select: { archivedAt: true } },
       },
     })
@@ -439,6 +478,22 @@ export async function updateVariant(
       }
       next.costPrice = data.costPrice
     }
+    // P1-D (P1-21, R-8): nullable low-stock threshold. undefined = untouched;
+    // null = disabled (cleared); 0 and positive integers accepted; negative
+    // values and non-integers rejected server-side (safe validation error).
+    // Evaluation is read-time — no derived low-stock state is persisted.
+    if (data.lowStockThreshold !== undefined) {
+      if (data.lowStockThreshold === null) {
+        next.lowStockThreshold = null
+      } else if (Number.isInteger(data.lowStockThreshold) && data.lowStockThreshold >= 0) {
+        next.lowStockThreshold = data.lowStockThreshold
+      } else {
+        throw new DomainError(
+          "VALIDATION",
+          "Low stock threshold must be a non-negative whole number, or empty to disable."
+        )
+      }
+    }
     for (const field of ["sku", "barcode"] as const) {
       if (data[field] === undefined) continue
       const value = data[field]?.trim() || null
@@ -457,6 +512,8 @@ export async function updateVariant(
     const before = {
       name: variant.name, sku: variant.sku, barcode: variant.barcode,
       sellingPrice: variant.sellingPrice, costPrice: variant.costPrice,
+      // P1-D (F3 closure): null = disabled, 0 = out-of-stock only, >0 = value.
+      lowStockThreshold: variant.lowStockThreshold,
     }
 
     const updated = await tx.productVariant.update({
@@ -465,6 +522,7 @@ export async function updateVariant(
       select: {
         id: true, productId: true, name: true, sku: true, barcode: true,
         sellingPrice: true, costPrice: true,
+        lowStockThreshold: true,
       },
     }).catch((error: unknown) => mapUniqueViolation(error, "SKU or barcode"))
 
@@ -475,6 +533,9 @@ export async function updateVariant(
       after: {
         name: updated.name, sku: updated.sku, barcode: updated.barcode,
         sellingPrice: updated.sellingPrice, costPrice: updated.costPrice,
+        // P1-D (F3 closure): the post-edit threshold, so set / change / clear
+        // (null) are all reconstructable from the audit trail.
+        lowStockThreshold: updated.lowStockThreshold,
       },
     })
 
@@ -664,59 +725,57 @@ export async function adjustInventory(
   }
 
   return prisma.$transaction(async (tx) => {
-    // TENANT AUTHORIZATION: variant and location must both belong to the
-    // caller's organization before any inventory change is possible.
-    // C-D20 (approved): the location must also be ACTIVE — stock adjustments
-    // (ADDED/REMOVED) at an archived location are rejected. This fetch runs
-    // INSIDE the transaction, so it is simultaneously the tenant check and
-    // the in-transaction archived-state check (no race window against the
-    // archive transition beyond the documented pre-tx membership residual).
-    const [variant, location] = await Promise.all([
-      tx.productVariant.findFirst({
-        where: { id: variantId, product: { organizationId: orgId } },
-        select: { id: true },
-      }),
-      tx.location.findFirst({
-        where: { id: locationId, store: { organizationId: orgId }, archivedAt: null },
-        select: { id: true },
-      }),
-    ])
-    if (!variant || !location) {
-      throw new DomainError("FORBIDDEN", "You are not authorized to adjust this inventory.")
-    }
-
-    // 1. Atomically update inventory (prevent negative stock)
-    const updateResult = await tx.inventory.updateMany({
-      where: {
-        locationId,
-        variantId,
-        quantity: adjustment < 0 ? { gte: Math.abs(adjustment) } : undefined
+    // P1-D §6.1: the single-writer helper performs the in-transaction tenant
+    // verification AND the active-location check (C-D20: stock adjustments at
+    // archived locations are rejected — same fetch, same in-tx position, no
+    // race window beyond the documented pre-tx membership residual), the
+    // guarded update, and the one StockMovement. Both mappings preserve this
+    // site's shipped errors exactly (§6.1.1).
+    await mutateInventory(tx, {
+      orgId,
+      locationId,
+      variantId,
+      delta: adjustment,
+      type: adjustment > 0 ? "ADDED" : "REMOVED",
+      actorId,
+      referenceId: reason, // manual reason stored as the movement reference
+      errors: {
+        unauthorized: {
+          code: "FORBIDDEN",
+          message: "You are not authorized to adjust this inventory.",
+        },
+        insufficient: {
+          code: "INSUFFICIENT_STOCK",
+          message: "Insufficient stock to remove this quantity.",
+        },
       },
-      data: { quantity: { increment: adjustment } }
     })
 
-    if (updateResult.count === 0) {
-      throw new DomainError("INSUFFICIENT_STOCK", "Insufficient stock to remove this quantity.")
-    }
-
-    // 2. Log the Stock Movement
-    await tx.stockMovement.create({
-      data: {
-        locationId,
-        variantId,
-        actorId,
-        type: adjustment > 0 ? "ADDED" : "REMOVED",
-        quantity: adjustment,
-        referenceId: reason // Using referenceId to store the manual reason
-      }
-    })
-
-    // 3. Log the Audit Event
-    await logAuditEvent(orgId, actorId, "UPDATE_PRODUCT", variantId, {
-      action: "INVENTORY_ADJUSTMENT",
-      adjustment,
-      reason
-    })
+    // 2. Log the Audit Event
+    // P1-D (PD-D5, R-5): adjustments now carry their own canonical event.
+    // Before P1-D this was UPDATE_PRODUCT with an INVENTORY_ADJUSTMENT marker
+    // in metadata; the payload is unchanged, only the action name is now
+    // accurate (PD-AC23). Migration D3 introduces the value in an earlier
+    // transaction, so it is safe to use here.
+    //
+    // The caller's transaction client is passed explicitly (audit.ts:47), so
+    // the event joins the SAME atomicity boundary as the guarded quantity
+    // update and the StockMovement: a failure at any point - including at
+    // COMMIT, after this statement has already executed - rolls all three
+    // back together. Without the client the insert would run on the pool
+    // connection and could outlive a rolled-back adjustment.
+    await logAuditEvent(
+      orgId,
+      actorId,
+      "ADJUST_INVENTORY",
+      variantId,
+      {
+        action: "INVENTORY_ADJUSTMENT",
+        adjustment,
+        reason,
+      },
+      tx
+    )
 
     return { success: true }
   })

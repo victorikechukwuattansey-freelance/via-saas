@@ -209,6 +209,23 @@ export async function updateVariant(formData: FormData) {
   if (typeof sellingPrice === "string") return { error: sellingPrice }
   if (typeof costPrice === "string") return { error: costPrice }
 
+  // P1-D (P1-21, R-8): threshold is optional on the form; absent field =
+  // untouched, empty = disabled (NULL), otherwise a non-negative integer.
+  // Final validation is server-side in the core (defense in depth).
+  const lowStockRaw = formData.get("lowStockThreshold")
+  let lowStockThreshold: number | null | undefined
+  if (lowStockRaw === null) {
+    lowStockThreshold = undefined
+  } else if (typeof lowStockRaw !== "string" || lowStockRaw.trim() === "") {
+    lowStockThreshold = null
+  } else {
+    const parsed = Number.parseInt(lowStockRaw, 10)
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      return { error: "Low stock threshold must be a non-negative whole number, or empty to disable." }
+    }
+    lowStockThreshold = parsed
+  }
+
   try {
     await updateVariantCore(context.orgId, context.userId, variantId, {
       name,
@@ -216,6 +233,7 @@ export async function updateVariant(formData: FormData) {
       barcode: barcode ?? null,
       sellingPrice,
       costPrice,
+      lowStockThreshold,
     })
     revalidatePath("/products")
     return { success: true }
