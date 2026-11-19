@@ -6,7 +6,7 @@
 
 ## 1. Purpose and status
 
-**Status: PD-1, PD-2, PD-3 AND PD-4 IMPLEMENTED AND VERIFIED; P1-D is NOT closed (PD-AC27 and two Definition-of-Done items remain open).** This document is the canonical plan for P1-D. PD-1 (P1-19), PD-2 (P1-20), PD-3 (P1-21) and PD-4 (P1-22, StockCounts) are implemented; migrations **D1, D2 and D3** exist and have replayed on a fresh disposable database; the full suite passes at **24 files / 328 tests**; every workspace type-checks. PD-4 was implemented under a separate, explicit owner authorization (2026-11-18) and its evidence is recorded in **§16.8**. Still open and explicitly not authorized: CI verification on a pushed commit (PD-AC27), the owner's dev-database smoke test (DoD 5), and commit/push/deployment (DoD 6). No commit, push, deployment, or production-database operation has occurred for any P1-D work.
+**Status: PD-1, PD-2, PD-3 AND PD-4 IMPLEMENTED AND VERIFIED; P1-D is CLOSED (declared 2026-11-19).** This document is the canonical plan for P1-D. PD-1 (P1-19), PD-2 (P1-20), PD-3 (P1-21) and PD-4 (P1-22, StockCounts) are implemented; migrations **D1, D2 and D3** exist and have replayed on a fresh disposable database; every workspace type-checks. PD-4 was implemented under a separate, explicit owner authorization (2026-11-18) and its evidence is recorded in **§16.8**. The three gates that were open when §16 was first populated are now satisfied, each with its evidence recorded in **§16.4**: **PD-AC27** — CI on the pushed commit (`via-saas CI` run **#7**, run ID `44414365910`, commit `5cd885a`, conclusion **success**, 2026-11-18); **DoD 5** — the owner's dev-database smoke test and the stock-count list/detail browser walkthrough, **OWNER-CONFIRMED 2026-11-19**; **DoD 6** — commit `5cd885a` pushed to `via-saas/main`, with the `via-saas/` tree clean at that committed state. **Historical note, preserved:** as recorded on 2026-11-18, PD-AC27, DoD 5 and DoD 6 were open and no commit, push, deployment, or production-database operation had occurred for any P1-D work. The historical **full-suite totals** quoted in this document (278 and 328) do not reconcile with the committed tree; **§16.9.2** records the observed static declaration count and the unresolved discrepancy rather than asserting either total. The per-file test counts cited for individual suites are unaffected, and a static declaration count is **not** an execution result.
 
 Owner decisions recorded in this plan (§8) were ruled by the owner on 2026-11-17:
 
@@ -425,9 +425,11 @@ Added per DoD item 7. **Nothing here changes the plan**: it records what exists,
 | Term | Meaning |
 |---|---|
 | **IMPLEMENTED** | The artifact exists in the working tree. |
-| **VERIFIED** | A command or test **actually executed** on 2026-11-18 passed (§16.4). Evidence carried over from earlier reports is labelled as inherited. |
+| **VERIFIED** | A command or test **actually executed** passed (§16.4). Evidence carried over from earlier reports is labelled as inherited. |
+| **SATISFIED** | An acceptance criterion or Definition-of-Done gate is met, supported by the specific evidence recorded for it in §16.4. Used for **gates** (PD-AC27, DoD 5, DoD 6) and deliberately distinct from **VERIFIED** (a command/test executed directly, §16.4) and from **OWNER-CONFIRMED** (the owner's own check, not an automated-test result). |
 | **CODE-ONLY** | Correctness established by source inspection; no executable assertion exists for it in this harness. |
 | **NOT RUNTIME-TESTED** | Requires a browser, a live dev stack, or a pushed commit. |
+| **OWNER-CONFIRMED** | The owner personally performed the check and reported the outcome; **not** an automated-test result. Always dated at the point of confirmation. |
 | **NOT AUTHORIZED** | The owner has not authorized the work; no artifact of any kind exists. |
 
 ### 16.2 Phase status
@@ -437,30 +439,30 @@ Added per DoD item 7. **Nothing here changes the plan**: it records what exists,
 | **PD-1** | P1-19 inventory mutation contract | **IMPLEMENTED + VERIFIED** | `packages/core/src/inventory.ts` (new, single-writer helper); all four call sites routed through it (`orders.ts` checkout / ATTENTION FULFILL / RETURN, `products.ts` adjust); initial `ADDED` movement at both creation sites; `tests/helpers.ts` fixture routing; `tests/inventory-contract.test.ts` (new). Two owner-approved frozen-test amendments (plan §5 item 5). |
 | **PD-2** | P1-20 inventory history UI | **IMPLEMENTED + VERIFIED** (page rendering + sidebar visibility: CODE-ONLY) | `apps/merchant-dashboard/lib/inventory-history.ts` (new loader), `app/(dashboard)/inventory/page.tsx` (new), sidebar entry, `tests/inventory-history.test.ts` (new, 20 tests). |
 | **PD-3** | P1-21 low-stock thresholds | **IMPLEMENTED + VERIFIED** (banner/badge rendering and the STAFF role gate: CODE-ONLY) | Migration **D1**; `ProductVariant.lowStockThreshold Int?`; threshold validation in `updateVariant`; `lib/low-stock.ts` (new, read-time evaluation); dashboard banner + count; product badge, `lowStock=1` filter, editor field, action parsing; `tests/low-stock.test.ts` (new, 20 tests). |
-| **PD-4** | P1-22 stock counts | **IMPLEMENTED + VERIFIED** (browser rendering of the count pages: CODE-ONLY; DoD 5/6 open) | Migrations **D2** (`20261118120000_p1d_stock_counts`) + **D3** (`20261118120001_p1d_audit_actions`); `StockCountStatus` enum, `StockCount` + `StockCountLine` models and back-relations; `packages/core/src/stock-counts.ts` (open / enter / approve / cancel / `lockInventoryRows`); `ADJUST_INVENTORY` audit switch in `adjustInventory`; count-reference resolution in `lib/inventory-history.ts`; `apps/merchant-dashboard/lib/stock-counts.ts` (list + detail loaders, role resolution, keyset pagination); `app/(dashboard)/stock-counts/{page.tsx,actions.ts,OpenCountForm.tsx}` + `[countId]/{page.tsx,CountEntryForm.tsx}`; sidebar entry; `tests/stock-counts.test.ts` (new, 46 tests) and 4 PD-AC24 count-reference tests added to `tests/inventory-history.test.ts`. |
+| **PD-4** | P1-22 stock counts | **IMPLEMENTED + VERIFIED** (browser rendering of the count pages: CODE-ONLY) | Migrations **D2** (`20261118120000_p1d_stock_counts`) + **D3** (`20261118120001_p1d_audit_actions`); `StockCountStatus` enum, `StockCount` + `StockCountLine` models and back-relations; `packages/core/src/stock-counts.ts` (open / enter / approve / cancel / `lockInventoryRows`); `ADJUST_INVENTORY` audit switch in `adjustInventory`; count-reference resolution in `lib/inventory-history.ts`; `apps/merchant-dashboard/lib/stock-counts.ts` (list + detail loaders, role resolution, keyset pagination); `app/(dashboard)/stock-counts/{page.tsx,actions.ts,OpenCountForm.tsx}` + `[countId]/{page.tsx,CountEntryForm.tsx}`; sidebar entry; `tests/stock-counts.test.ts` (new, **46 tests as recorded on 2026-11-18; the committed file contains 48** - §16.9.1/§16.9.2) and 4 PD-AC24 count-reference tests added to `tests/inventory-history.test.ts`. |
 
 ### 16.3 Validation evidence - executed 2026-11-18 (HEAD `9f3079f`, index empty)
 
 | Check | Command | Result |
 |---|---|---|
 | Focused PD-2 + PD-3 suites | `npx vitest run tests/low-stock.test.ts tests/inventory-history.test.ts` | **2 files / 40 tests passed** |
-| Full suite | `npm test` | **23 files / 278 tests passed** (275 at the phase-boundary baseline + 3 added by the F3/F4 closures) |
+| Full suite | `npm test` | **23 files / 278 tests passed** (275 at the phase-boundary baseline + 3 added by the F3/F4 closures) - *historical figure as recorded on 2026-11-18; it does not match the committed tree (20 files / 222 declarations at `9f3079f`) - see §16.9.2.* |
 | All-workspace type-checks | `npm run type-check` | **exit 0** - 5 workspaces: `api`, `merchant-dashboard`, `@via-saas/core`, `@via-saas/database`, `@via-saas/ui` |
 | Schema parse | `npx prisma validate` | "The schema at prisma\schema.prisma is valid" |
 | Fresh-DB migration replay | `tests/global-setup.ts` (drops/creates `via_saas_test`, then `prisma migrate deploy`) followed by a read-only `_prisma_migrations` query | all **9** migrations recorded with `finished_at` non-null; `20261118090000_p1d_thresholds` (D1) applied last |
 
 The suite run recreates the **disposable** `via_saas_test` database - that is the harness contract (§12), not a live-data mutation. The development database (`via_saas_db`) was not connected to, migrated, cleaned, or modified, and no production system was contacted.
 
-**Inherited, not re-verified:** CI status on a pushed commit (PD-AC27 - no push is authorized, so it cannot be verified).
+**Inherited, not re-verified at that time:** CI status on a pushed commit (PD-AC27). *Historical as of 2026-11-18:* no push was authorized, so it could not be verified then. **Current:** verified on 2026-11-18 - `via-saas CI` run #7 (run ID `44414365910`) on commit `5cd885a` concluded **success** (§16.4).
 
 #### 16.3.1 PD-4 validation executed now (2026-11-18, after the PD-4 working tree was complete)
 
 | Check | Command | Result |
 |---|---|---|
-| Focused PD-4 suite | `npx vitest run tests/stock-counts.test.ts` | **1 file / 46 tests passed** |
+| Focused PD-4 suite | `npx vitest run tests/stock-counts.test.ts` | **1 file / 46 tests passed** (46 at that time; the committed file contains 48 - §16.9.1) |
 | Focused PD-2 regression suite (with the 4 new PD-AC24 tests) | `npx vitest run tests/inventory-history.test.ts` | **1 file / 24 tests passed** (20 inherited + 4 added) |
 | Concurrent-approval subsets (PD-AC38 / PD-AC22) | `npx vitest run tests/stock-counts.test.ts -t "PD-AC38"` / `-t "PD-AC22"` | both subsets pass against real PostgreSQL with the explicit overlap latch |
-| Full suite | `npx vitest run` | **24 files / 328 tests passed** (278 baseline + 46 PD-4 + 4 history) |
+| Full suite | `npx vitest run` | **24 files / 328 tests passed** (278 baseline + 46 PD-4 + 4 history) - *historical figure as recorded on 2026-11-18. §16.9.2 records 24 files / **332** test declarations in the committed tree (`stock-counts.test.ts` contributing 48, not 46); this 328 figure is retained as the historical record and is not asserted as the current count.* |
 | All-workspace type-checks | `npm run type-check` | **exit 0** - `api`, `merchant-dashboard`, `@via-saas/core`, `@via-saas/database`, `@via-saas/ui` |
 | Schema parse | `npx prisma validate` | "The schema at prisma\schema.prisma is valid" |
 | Client generation | `npx prisma generate` | Generated Prisma Client **v5.22.0** |
@@ -492,15 +494,15 @@ All runs targeted the disposable `via_saas_test` database. `via_saas_db` (develo
 | PD-AC23 | **PASS (verified)** | `adjustInventory` now writes `ADJUST_INVENTORY` with the unchanged metadata payload (`action`, `adjustment`, `reason`), asserted exactly. |
 | PD-AC24 | **PASS (verified)** | Count movements surface as `Stock count #<n>` links in the history page; resolution is ONE batched org+location-scoped probe per page (asserted via spy), skipped when the page has no candidates, and never resolves a foreign or out-of-scope count. |
 | PD-AC26 | **PASS for D1, D2, D3 (verified)** | All three migrations validated, replayed on a fresh disposable database and confirmed by direct object inspection (D1 thresholds; D2 StockCount models/enum/indexes/uniques/FKs; D3 four `AuditAction` values). |
-| PD-AC27 | **NOT VERIFIED** | CI on the pushed commit requires a push (not authorized). Unchanged by PD-4. |
+| PD-AC27 | **SATISFIED (CI verified 2026-11-18)** | Repository `victorikechukwuattansey-freelance/via-saas`; commit `5cd885a6edfa0de000dc71c65c913a34d64edc01`; workflow **`via-saas CI`**, run **#7**, run ID **`44414365910`**; conclusion **success**; 2026-11-18. Run URL: https://github.com/victorikechukwuattansey-freelance/via-saas/actions/runs/44414365910. The `via-saas CI` workflow is the evidence for this criterion; a **separate**, unrelated `test` workflow also ran on this commit and **failed** - disclosed in full in **§16.9.3**. The safe-error / no-existence-leak half of the criterion was verified earlier (PD-AC16, PD-AC21). Previously recorded as **NOT VERIFIED** because no push was authorized at that time. |
 | PD-AC28 | **PASS (verified)** | One line per `(countId, variantId)` enforced at the database level (defense-in-depth over the unique index). |
 | PD-AC29 | **PASS (verified)** | Opening auto-populates exactly one line per `Inventory` row at the location (including zero-quantity rows), excludes archived products and other locations, and freezes `expectedQty` as the opening snapshot for the life of the count. |
 | PD-AC30 | **PASS (verified)** | Cancellation is terminal, writes one `STOCK_COUNT_CANCEL` event, produces no movement, and changes no balance. |
 | PD-AC31 | **PASS (verified)** | Cancelling an approved count and approving a cancelled count are both rejected with frozen messages; a repeated cancellation leaves the original `cancelledAt` and one event only. |
 | PD-AC32 | **PASS (verified)** | Approval is atomic: an archived product or a deleted inventory row rolls the whole approval back to OPEN with zero movements, and the same count approves successfully after the condition is fixed. |
-| PD-AC38 | **PASS (verified)** | Real two-approval overlap on the same variant, forced by an explicit `Inventory` row-lock gate and confirmed via `pg_stat_activity`: both serialize, the surviving balance is one counted value, the ledger reconciles, each count has exactly one movement, and both end APPROVED. A two-variant variant of the test tolerates (and safely retries) a PostgreSQL deadlock — invariants asserted, never which side wins. |
-| DoD 5 (owner dev-DB smoke) | **OPEN** | Manual browser/DB smoke test; not performed by this pass. |
-| DoD 6 (commit + CI) | **OPEN** | Working tree intentionally uncommitted; nothing staged, committed, or pushed. |
+| PD-AC38 | **PASS (verified)** | Real two-approval overlap on the same variant, forced by an explicit `Inventory` row-lock gate and confirmed via `pg_stat_activity`: both serialize, the surviving balance is one counted value, the ledger reconciles, each count has exactly one movement, and both end APPROVED. A two-variant variant of the test tolerates (and safely retries) a PostgreSQL deadlock — invariants asserted, never which side wins. Two further tests in the same file cover concurrent approval of the **same** count (exactly one winner, no duplicate movement or audit) and a failed approval leaving **no** `STOCK_COUNT_APPROVE` audit row — see §16.9.1. |
+| DoD 5 (owner dev-DB smoke) | **OWNER-CONFIRMED 2026-11-19** | Owner-confirmed evidence, **not** an automated-test result. The owner confirms that (a) all five §15 item 5 smoke outcomes passed in the development environment — adjust stock → history shows the typed movement; set threshold → banner flags a low variant; run a count with a variance → approve → exactly one corrective movement, quantity = counted, ledger reconciles — and (b) the browser walkthrough of the stock-count **list** and **detail** pages passed, including rendering and usability. The same smoke pass uncovered the CategoryManager defect fixed as F-4.2 (§16.8.2). Previously recorded as **OPEN** (not performed by the implementation pass). |
+| DoD 6 (commit + CI) | **SATISFIED (2026-11-18)** | Commit `5cd885a6edfa0de000dc71c65c913a34d64edc01` (parent `9f3079f`) contains all 32 P1-D files, every path under `via-saas/`; pushed as `26e73b1..5cd885a` to **`via-saas/main`** (`origin` was never used for VIA SaaS); `via-saas CI` run #7 (run ID `44414365910`) concluded **success**; `main` is in sync with `via-saas/main`. The `via-saas/` working tree **was clean at that committed state on 2026-11-18**; the **only** subsequent VIA SaaS modification is this documentation update (uncommitted at the time of writing - it is not claimed that the current working tree is clean). Previously recorded as **OPEN** with the working tree intentionally uncommitted. |
 | DoD 7 (§16) | **CLOSED** | This section. |
 
 ### 16.5 Prerequisite closures from the phase-boundary audit
@@ -540,14 +542,16 @@ The hazard under a naive implementation (blocking for the literal wording "net e
 
 **Residual caveat (recorded, not hidden):** `ORDER BY … FOR UPDATE` makes lock acquisition order deterministic *at the SQL level*, but PostgreSQL does not contractually guarantee row-lock acquisition strictly in sort order at the planner level. The implementation therefore does not depend on it for correctness: if the database deadlocks on a two-variant overlap, the transaction aborts safely (count stays OPEN, zero movements) and a retry succeeds. The two-variant test asserts exactly that tolerant behavior.
 
-**Evidence:** `tests/stock-counts.test.ts` — 46 tests, of which the `PD-AC38 — concurrent approvals serialize on the Inventory row lock` block covers (a) ascending-order locking with locked balances returned, (b) two approvals of the same variant forced to overlap by an explicit `Inventory` row-lock gate and confirmed through `pg_stat_activity` (`wait_event_type = 'Lock'`, `FOR UPDATE`), and (c) the deadlock-tolerant two-variant case. No wall-clock sleeps are used as a synchronization mechanism; polling of `pg_stat_activity` has a bounded deadline and fails loudly if the expected overlap is never observed.
+**Evidence:** `tests/stock-counts.test.ts` — 46 tests, of which the `PD-AC38 — concurrent approvals serialize on the Inventory row lock` block covers (a) ascending-order locking with locked balances returned, (b) two approvals of the same variant forced to overlap by an explicit `Inventory` row-lock gate and confirmed through `pg_stat_activity` (`wait_event_type = 'Lock'`, `FOR UPDATE`), and (c) the deadlock-tolerant two-variant case. No wall-clock sleeps are used as a synchronization mechanism; polling of `pg_stat_activity` has a bounded deadline and fails loudly if the expected overlap is never observed. *(Test count as recorded on 2026-11-18. The committed file holds **48** tests: the same-count approval test and the failed-approval audit-rollback test were added in the same commit — §16.9.1.)*
 
-### 16.7 Explicitly not authorized / still open
+### 16.7 Explicitly not authorized / still open (state recorded 2026-11-18; items 1-3 since closed)
 
-- **PD-AC27 / DoD 6** - no staging, commit, push, deployment, or CI verification has occurred or is authorized. HEAD is still `9f3079f`; all PD-1..PD-4 work is uncommitted in the working tree.
-- **DoD 5** - the manual dev-database smoke test remains an owner action (no browser or dev-stack interaction was performed for the count pages).
-- **Browser rendering of the count surfaces** - the two count pages and the entry form are CODE-ONLY: their loaders and actions are unit-tested, but the React render itself is not exercised in vitest.
-- **F5, F6, F8** - recorded and deliberately not fixed (out of scope for every phase so far).
+Preserved for the record. Each item states the position recorded on 2026-11-18 and its current status; §16.4 is authoritative for the present state.
+
+- **PD-AC27 / DoD 6** - recorded 2026-11-18: "no staging, commit, push, deployment, or CI verification has occurred or is authorized. HEAD is still `9f3079f`; all PD-1..PD-4 work is uncommitted in the working tree." **Current: CLOSED 2026-11-18** - commit `5cd885a` (32 files, all under `via-saas/`) pushed as `26e73b1..5cd885a` to `via-saas/main`; `via-saas CI` run #7 (run ID `44414365910`) concluded **success**; `via-saas/` tree clean.
+- **DoD 5** - recorded 2026-11-18: "the manual dev-database smoke test remains an owner action." **Current: CLOSED, OWNER-CONFIRMED 2026-11-19** - all five §15 item 5 outcomes passed, and the stock-count list/detail browser walkthrough passed including rendering and usability (§16.4).
+- **Browser rendering of the count surfaces** - recorded 2026-11-18: the two count pages and the entry form were CODE-ONLY because the React render is not exercised in vitest. **Current:** the owner's DoD 5 browser walkthrough (2026-11-19) covers rendering and usability of the list and detail pages; they remain outside *automated* coverage by design (this repo has no DOM/component test harness).
+- **F5, F6, F8** - unchanged and still open: recorded and deliberately not fixed (out of scope for every phase so far). See §16.5.
 
 ### 16.8 PD-4 deviations, additions and residual findings
 
@@ -576,7 +580,7 @@ The post-implementation acceptance audit returned **IMPLEMENTATION ACCEPTABLE WI
 
 Both entries are **owner decisions**, not implementation notes. They do not alter PD-AC17, PD-AC18, the state machine (§6.3), or any other approved semantics, and they do not broaden P1-D scope.
 
-A third finding from the same audit - the pre-existing `adjustInventory` audit event being written outside the adjustment transaction (recorded here as D-obs.3) - was separately authorized for repair together with two additional PD-AC38 tests; those changes are recorded in §16.9.
+A third finding from the same audit - the pre-existing `adjustInventory` audit event being written outside the adjustment transaction (recorded here as D-obs.3) - was separately authorized for repair together with two additional PD-AC38 tests. Both were implemented and committed: the repair and the two tests are recorded in **§16.9.1**.
 
 ### 16.8.2 CategoryManager fix — F-4.2 (owner-authorized 2026-11-18, DoD 5 scope extension)
 
@@ -602,6 +606,66 @@ A third finding from the same audit - the pre-existing `adjustInventory` audit e
 
 **Classification:** Owner-authorized scope extension. Not part of any PD-AC. Recorded here as F-4.2 so the milestone's evidence trail is complete. Does not affect PD-AC1..PD-AC38 outcomes; does not change P1-D acceptance status.
 
+### 16.9 Post-audit repair record and closure reconciliation (2026-11-18 / 2026-11-19)
+
+Added during the documentation reconciliation that closed P1-D. This section records only work that exists in the committed tree; it adds no implementation detail that is not observable there and changes no acceptance criterion.
+
+#### 16.9.1 D-obs.3 repair - `adjustInventory` audit atomicity, and the two authorized PD-AC38 tests
+
+**Finding (D-obs.3, from the post-implementation acceptance audit):** `adjustInventory` in `packages/core/src/products.ts` wrote its `ADJUST_INVENTORY` audit event through `logAuditEvent(...)` **without** the transaction client, so the audit row was committed outside the adjustment transaction - the quantity change and its audit record could diverge.
+
+**Repair (owner-authorized 2026-11-18):** `logAuditEvent` in `packages/core/src/audit.ts` already accepts an optional transaction client; the `ADJUST_INVENTORY` call site now passes `tx`, so the audit row shares the adjustment transaction. No signature change, no schema change, no behavioral change at any other call site, and the `ADJUST_INVENTORY` metadata payload (`action`, `adjustment`, `reason`) is unchanged (the PD-AC23 assertion is untouched).
+
+**Status: IMPLEMENTED AND COMMITTED** in `5cd885a`. Verified by reading the committed file (`git show HEAD:via-saas/packages/core/src/products.ts`): the `"ADJUST_INVENTORY"` call passes `tx`.
+
+**The two additional PD-AC38 tests authorized alongside the repair were implemented**, in `tests/stock-counts.test.ts`:
+
+| Test | What it proves |
+|---|---|
+| `two concurrent approvals of the SAME count: exactly one winner, no duplicate movement or audit` | Two simultaneous approvals of the *same* count serialize behind a `StockCount` row `FOR UPDATE` latch held from a separate connection: exactly one succeeds, the count ends APPROVED once, with no duplicate corrective movement and no duplicate `STOCK_COUNT_APPROVE` event. |
+| `failed approval (archived product) leaves NO STOCK_COUNT_APPROVE audit row and no movement` | A failed approval rolls back completely - the count stays OPEN, zero `StockMovement` rows reference the count, and **zero** `STOCK_COUNT_APPROVE` audit rows exist (the assertion the audit found missing). |
+
+Both are part of the committed `tests/stock-counts.test.ts` (48 `it(...)` declarations). Both are covered by the focused two-file validation recorded in **§16.9.2** (`stock-counts.test.ts` 48 tests + `inventory-contract.test.ts` 18 tests = **66 tests across two files**) - previously reported validation evidence, **not** a run performed during this documentation pass. PD-AC38 therefore remains **PASS**, now covering the same-count overlap and the failed-approval audit rollback in addition to the different-counts concurrency evidence in §16.6.
+
+#### 16.9.2 Test-count reconciliation - observed count recorded, historical discrepancy explicitly unresolved
+
+Three different figures appear across this milestone's records. They are listed below as recorded/measured, with no figure silently substituted for another:
+
+| Source | Files | Tests |
+|---|---|---|
+| §16.3 (recorded 2026-11-18, PD-2/PD-3 boundary) | 23 | 278 |
+| §16.3.1 (recorded 2026-11-18, PD-4) | 24 | 328 (= 278 baseline + 46 PD-4 + 4 history) |
+| Commit `5cd885a` message and the implementation handoff | - | 332 / 332 |
+| **Static count of `it(`/`test(` declarations in the committed `tests/**/*.test.ts` at `5cd885a`** | **24** | **332** |
+
+What is directly observable in the committed tree:
+
+- `vitest.config.ts` includes `tests/**/*.test.ts` only; at `5cd885a` that is **24 files**.
+- Those 24 files contain **332** `it(...)`/`test(...)` declarations, with **no** `it.each`, `test.each` or `describe.each` and no test-generating loops (the `for` loops in these suites iterate assertions inside a test, not test cases). The declaration count therefore equals the executed-test count for every file.
+- Cross-check: the focused two-file validation reported **2 files / 66 tests passed** for `npx vitest run tests/stock-counts.test.ts tests/inventory-contract.test.ts` (`stock-counts.test.ts` 48 + `inventory-contract.test.ts` 18 = 66). This is **previously reported execution evidence** - it was performed before the P1-D commit on 2026-11-18 and was **not** re-executed during this documentation-only pass (no fresh run is claimed here). It is also **not** a full-suite run.
+- `stock-counts.test.ts` declares **48** tests, not the **46** recorded in §16.3.1 and §16.6. The +2 is explained by §16.9.1: the two additional PD-AC38 tests were added to that file in the same commit.
+- The parent commit `9f3079f` (`HEAD^`) contains **20** test files and **222** declarations - not the "23 files / 278 tests" recorded in §16.3, and not the 278-test baseline that §16.3.1's arithmetic starts from.
+
+**Conclusion (deliberately unresolved):** the committed suite is **24 files / 332 test declarations**, and 332 is consistent with the reported `332/332`. The historical **328** - and the **278** baseline behind it - is preserved as recorded but is **not reproducible** from the committed tree: it undercounts `stock-counts.test.ts` by two and rests on a 278-test / 23-file baseline that does not match the 222 declarations / 20 files at `9f3079f`. The exact composition of the historical 278 figure cannot be established from the available evidence.
+
+**Why the gap is not closed here:** no CI artifact exposing per-test counts is available locally (the `gh` CLI is not installed on this machine), and the full suite was **not** re-executed during this documentation-only pass. The 332 figure is therefore supported by committed-source evidence plus the 66-test cross-check, but it is not claimed as a fresh full-suite execution result in this document.
+
+#### 16.9.3 Sibling `test` workflow on `5cd885a` (disclosure)
+
+`via-saas CI` is the canonical workflow for PD-AC27 (§3). A second, **unrelated** workflow also ran on commit `5cd885a` and **failed**. It is recorded here in full so that the "CI verified" statements in §16.4 cannot be read as covering every workflow that ran:
+
+| Item | Value |
+|---|---|
+| Workflow | `test` (`.github/workflows/test.yml`) - the **parent workspace's** n8n lead-recovery gate, **not** a VIA SaaS workflow |
+| Run | **#7**, run ID **`44414365728`** |
+| Commit | `5cd885a6edfa0de000dc71c65c913a34d64edc01` (the same commit) |
+| Date | 2026-11-18 |
+| Conclusion | **failure** |
+| Job | `n8n-lead-recovery full suite + frozen integrity + security gate` - a single job; it failed at its **"Full test suite"** step, so its "Frozen artifact integrity" and "Security gate" steps were skipped as a result |
+| Pre-existing | The same workflow also failed on the earlier P1-C commit `26e73b1` (run #6), so the failure was **not** introduced by P1-D |
+
+**Effect on P1-D: none.** PD-AC27 is defined against the canonical `via-saas CI` workflow (§3, §11), which concluded **success** on `5cd885a` (§16.4). The failing workflow exercises the parent workspace's `n8n-lead-recovery` project, contains no VIA SaaS job, and sits outside the P1-D scope and gates. It is disclosed here rather than omitted or minimised; it does not change the PD-AC27 result, DoD 6, or the closure decision. Whether the parent-workspace workflow should be repaired is a separate matter outside P1-D.
+
 ---
 
-*End of plan. Owner approvals PD-D1, PD-D2, PD-D3 recorded 2026-11-17; the R-1..R-11 review corrections were applied in a documentation-only pass on 2026-11-17 (R-5's `STOCK_COUNT_CANCEL` explicitly owner-approved); PD-D7 was satisfied by the owner at kickoff on 2026-11-18, when PD-1/PD-2/PD-3 plus migration D1 were authorized and implemented. PD-4 (P1-22) was authorized by the owner under a separate explicit authorization on 2026-11-18 and is implemented with migrations D2/D3 and its evidence recorded in §16.8. P1-D is **not closed**: PD-AC27, DoD 5 and DoD 6 remain open. No commit, push, deployment, or production database change is authorized by this document.*
+*End of plan. Owner approvals PD-D1, PD-D2, PD-D3 recorded 2026-11-17; the R-1..R-11 review corrections were applied in a documentation-only pass on 2026-11-17 (R-5's `STOCK_COUNT_CANCEL` explicitly owner-approved); PD-D7 was satisfied by the owner at kickoff on 2026-11-18, when PD-1/PD-2/PD-3 plus migration D1 were authorized and implemented. PD-4 (P1-22) was authorized by the owner under a separate explicit authorization on 2026-11-18 and is implemented with migrations D2/D3 and its evidence recorded in §16.8; the D-obs.3 audit-atomicity repair and the two additional PD-AC38 tests are recorded in §16.9.1. **P1-D is CLOSED (2026-11-19):** PD-AC27 is satisfied by `via-saas CI` run #7 (run ID `44414365910`, commit `5cd885a`, conclusion success, 2026-11-18); DoD 5 is OWNER-CONFIRMED 2026-11-19; DoD 6 is satisfied by commit `5cd885a` on `via-saas/main`, with the `via-saas/` tree clean at that committed state (2026-11-18); the only later VIA SaaS change is this documentation update. The commit and push were owner-authorized for the P1-D implementation only; this document authorizes no deployment and no production database change, and none has occurred. The suite-size figures in this document remain historically inconsistent: the historical **full-suite totals** (278 and 328) are unresolvable from the committed tree - see §16.9.2, which records the observed 24 files / 332 declarations and explicitly leaves those two totals unresolved rather than reconciling them.*
