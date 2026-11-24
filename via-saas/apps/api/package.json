@@ -10,6 +10,7 @@
      "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@fastify/cookie": "^9.4.0",
     "@via-saas/core": "file:../../packages/core",
     "@via-saas/database": "file:../../packages/database",
     "fastify": "^4.26.2",
