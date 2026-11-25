@@ -91,6 +91,7 @@ model Organization {
   name           String
   subscriptionPlan PlanTier @default(STARTER)
   createdAt      DateTime   @default(now())
+  archivedAt     DateTime?
 
   stores         Store[]
   memberships    Membership[]
