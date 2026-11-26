@@ -1,8 +1,10 @@
 import Fastify from "fastify"
+import cookie from "@fastify/cookie"
 import cors from "@fastify/cors"
 import { getStorefrontProducts, processCheckout, upsertCustomer, DomainError } from "@via-saas/core"
 import { prisma } from "@via-saas/database"
 import crypto from "crypto"
+import { authenticateMerchant } from "./auth"
 
 /**
  * Builds the Fastify application WITHOUT binding a port. Exported so tests
@@ -12,6 +14,10 @@ import crypto from "crypto"
 export function buildApp() {
   const app = Fastify({ logger: true })
 
+  // Request-scoped merchant context is populated only by the auth pre-handler.
+  app.decorateRequest("merchantContext", null)
+  app.register(cookie)
+
   // CORS origins come from configuration (comma-separated). In local dev the
   // docker/storefront default is used; production must set STOREFRONT_ORIGINS.
   const allowedOrigins = (process.env.STOREFRONT_ORIGINS ?? "http://localhost:3001")
@@ -20,6 +26,7 @@ export function buildApp() {
     .filter(Boolean)
 
   app.register(cors, {
+    credentials: true,
     origin: (origin, cb) => {
       // Allow requests with no Origin header (same-origin tools, health checks)
       if (!origin || allowedOrigins.includes(origin)) {
@@ -41,6 +48,24 @@ export function buildApp() {
 
   // Health Check
   app.get("/health", async () => ({ status: "ok" }))
+
+  // Minimal protected endpoint used by the dashboard and API auth contract.
+  // Return only the fields needed to establish the active merchant context.
+  app.get(
+    "/api/merchant/session",
+    { preHandler: authenticateMerchant },
+    async (request) => {
+      const context = request.merchantContext!
+      return {
+        userId: context.userId,
+        orgId: context.orgId,
+        orgName: context.orgName,
+        locationId: context.locationId,
+        role: context.role,
+        accessibleLocationIds: context.accessibleLocationIds,
+      }
+    }
+  )
 
   /**
    * Resolves the merchant organization from the store's public slug.
